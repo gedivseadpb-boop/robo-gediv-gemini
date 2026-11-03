@@ -69,21 +69,8 @@ footer{padding:22px;text-align:center;color:#7690a0;font-size:12px}
 <script>
 "use strict";
 let DATA={};try{DATA=JSON.parse(document.getElementById('gediv-data').textContent);}catch{}
-  const actionLink = DATA.workflow_url || "";
-  const updateAnchor = document.getElementById("manual-update");
-  if(updateAnchor) {
-    if(actionLink && actionLink.startsWith("https://github.com/")) {
-      updateAnchor.href=actionLink;
-    } else {
-      updateAnchor.removeAttribute("href");
-      updateAnchor.style.opacity=".55";
-      updateAnchor.title="Disponível após executar no GitHub";
-      updateAnchor.addEventListener("click",e=>{e.preventDefault();alert("O botão será ativado após publicar o projeto em um repositório privado e executar pelo GitHub Actions.");});
-    }
-  }
-  const RECORDS=DATA.registros||[], EVENTS=DATA.eventos||[];
-  const isReviewed=r=>["VALIDADO","VALIDADA","CONFERIDO","CONFERIDA"].includes(String(r.validacao||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().trim());
-  let ALL=RECORDS.filter(isReviewed), PENDING=RECORDS.filter(r=>!isReviewed(r)), snapshot=null, client=null, scope='conferido';
+let ALL=DATA.registros||[],EVENTS=DATA.eventos||[],snapshot=null,client=null,scope='conferido';
+
 const TS=["Anotação de Tempo","Desaverbação","Licença para Interesses Particulares","Desistência de Licença","Licença Especial","Conversão de Licença Especial","Conversão de Férias"];
 let isPrivate=DATA.mode==="privado";
 const $=id=>document.getElementById(id);
@@ -117,7 +104,7 @@ function metrics(rows){
 }
 function csv(records){
  const cols=isPrivate?["data","resenha","processo","servidor","matricula","eixo","modalidade","grupo","subcategoria","resultado","alteracao","pagina","fonte","validacao"]:["data","resenha","eixo","modalidade","grupo","subcategoria","resultado","alteracao","validacao"];
- const v=x=>{let s=String(x??"");if(/^[\s]*[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
+ const v=x=>{let s=String(x??"");if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
  const text="\ufeff"+cols.join(";")+"\n"+records.map(r=>cols.map(c=>v(r[c])).join(";")).join("\n");
  const blob=new Blob([text],{type:"text/csv;charset=utf-8"});
  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="GEDIV_registros_filtrados.csv";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),250);
@@ -173,7 +160,7 @@ const cob = DATA.cobertura || {};
 const rest = (typeof cob.edicoes_pendentes_intervalo === "number")
   ? ` · ${cob.edicoes_pendentes_intervalo} edição(ões) ainda pendente(s) no período ${esc(cob.inicio||"")} a ${esc(cob.fim||"")}`
   : "";
-$("coverage").innerHTML=`Cobertura: ${DATA.edicoes?.length||0} edição(ões) registradas; ${(DATA.edicoes||[]).filter(e=>e.status!=="PROCESSADO").length} edição(ões) com leitura pendente${rest}. <strong>Indicadores incluem apenas registros conferidos. ${PENDING.length} candidato(s) aguardam revisão.</strong>`;
+$("coverage").innerHTML=`Cobertura: ${DATA.edicoes?.length||0} edição(ões) registradas; ${(DATA.edicoes||[]).filter(e=>e.status==="ERRO").length} falha(s) de coleta${rest}. <strong>Indicadores provisórios: registros pendentes de revisão humana.</strong>`;
 $("privacy-note").textContent=isPrivate?"ATENÇÃO: este arquivo contém nomes, matrículas e processos. Guarde em local de acesso restrito; não publique este HTML no GitHub Pages.":"Versão pública: nomes, matrículas e processos não são disponibilizados. Para consultar detalhes, use o arquivo privado recebido da execução.";
 function applySnapshot(){
  const converted=client.legacyView(snapshot,scope);ALL=converted.records;EVENTS=converted.events;
@@ -200,4 +187,3 @@ $('manual-update').onclick=()=>refresh();
 $('scope').onchange=e=>{scope=e.target.value;card='';applySnapshot();};
 render();if(location.protocol!=='file:')void refresh(true);
 </script></body></html>
-
