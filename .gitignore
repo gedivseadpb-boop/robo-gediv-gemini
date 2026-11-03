@@ -6,3 +6,7 @@ output/
 *.pyc
 # O estado contém dados pessoais e só pode ser salvo em repositório PRIVADO.
 # GitHub Actions versiona storage/estado.json no repositório privado.
+
+# Fontes e lotes reais somente em artefatos privados; nunca no código
+/fontes_privadas/
+/resultados_reais/

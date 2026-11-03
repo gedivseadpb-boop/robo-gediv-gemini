@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   coleta:
-    if: ${{ github.event.repository.private == true }}
+    if: ${{ github.event.repository.private == true && (github.event_name == 'workflow_dispatch' || vars.GEDIV_HOMOLOGADO == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
@@ -107,6 +107,7 @@ jobs:
           name: painel-gediv-privado-${{ github.run_number }}
           path: |
             output/painel_privado.html
+            output/painel_gerencial_privado.html
             output/dados_agregados.json
           if-no-files-found: warn
           retention-days: 7

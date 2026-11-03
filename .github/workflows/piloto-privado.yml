@@ -1,0 +1,66 @@
+name: "GEDIV | Piloto isolado de leitura"
+on:
+  push:
+    branches: ["codex/piloto-gediv-20261031"]
+    paths: [".github/workflows/piloto-privado.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gediv-piloto-isolado
+  cancel-in-progress: false
+jobs:
+  piloto:
+    if: ${{ github.event.repository.private == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Instalar leitor PDF
+        run: python -m pip install 'PyMuPDF>=1.24,<2' 'requests>=2.31,<3'
+      - name: Obter PDFs oficiais sem alterar checkpoint existente
+        timeout-minutes: 6
+        run: |
+          python - <<'PY'
+          import hashlib,json,sys
+          from pathlib import Path
+          import requests,fitz
+          output=Path('output-piloto-fontes');output.mkdir()
+          sources=[
+            ('2026-01-17','https://auniao.pb.gov.br/servicos/doe/2026/janeiro/diario-oficial-17-01-2026-portal.pdf'),
+            ('2026-10-10','https://auniao.pb.gov.br/servicos/doe/2026/outubro/diario-oficial-10-10-2026-portal.pdf'),
+            ('2026-10-29','https://auniao.pb.gov.br/servicos/doe/2026/outubro/diario-oficial-29-10-2026-portal.pdf')]
+          evidence=[]
+          for day,url in sources:
+            try:
+              r=requests.get(url,timeout=(8,25),stream=True,allow_redirects=False)
+              r.raise_for_status()
+              binary=bytearray()
+              for chunk in r.iter_content(65536):
+                binary.extend(chunk)
+                if len(binary)>25000000:raise ValueError('PDF excede limite')
+              if not binary.startswith(b'%PDF'):raise ValueError('Resposta não é PDF')
+              pdf=output/(day+'.pdf');pdf.write_bytes(binary)
+              with fitz.open(pdf) as doc:
+                pages=[{'pagina':i+1,'texto':p.get_text('text',sort=True)} for i,p in enumerate(doc)]
+              payload={'url':url,'data':day,'arquivo_sha256':hashlib.sha256(binary).hexdigest(),
+                       'paginas':pages,'metodo':'Texto nativo do PDF baixado; sem OCR'}
+              (output/(day+'.json')).write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
+              evidence.append({'data':day,'status':'PDF_OBTIDO','paginas':len(pages),
+                               'sha256':payload['arquivo_sha256'],'bytes':len(binary)})
+            except Exception as exc:
+              evidence.append({'data':day,'status':'FALHA','erro':type(exc).__name__+': '+str(exc)[:180]})
+            print(json.dumps(evidence[-1],ensure_ascii=False),flush=True)
+          (output/'evidencias.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')
+          if not any(x['status']=='PDF_OBTIDO' for x in evidence):sys.exit(2)
+          PY
+      - name: Guardar fontes e texto em artefato privado
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: gediv-fontes-reais-${{ github.run_number }}
+          path: output-piloto-fontes/
+          retention-days: 3
