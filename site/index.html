@@ -49,8 +49,8 @@ footer{padding:22px;text-align:center;color:#7690a0;font-size:12px}
 <label for="search">Buscar processo, servidor ou resenha</label><input id="search" placeholder="Digite para pesquisar" autocomplete="off">
 <div class="flex" style="margin-top:17px"><button id="clear">Limpar filtros</button><button class="primary" id="export">Exportar CSV</button></div>
 <div style="margin-top:14px">
-  <a class="btn primary" id="manual-update" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;text-decoration:none">↻ Atualizar Diário Oficial</a>
-  <small>Abre o GitHub Actions. Após executar, baixe o novo painel privado. Este HTML não atualiza sozinho.</small>
+  <button class="btn primary" id="manual-update">↻ Atualizar dados</button><label>Visão<select id="scope" aria-label="Situação da conferência"><option value="pendente">Em conferência</option><option value="conferido">Conferidos</option></select></label><p id="refresh-status" role="status"></p>
+  <small>Consulta o backend e atualiza esta tela. A coleta de PDFs é uma operação separada.</small>
 </div>
 <div class="notice" id="privacy-note">Dados individuais restritos à versão privada do painel. A versão pública exibe somente metadados sem identificação pessoal.</div>
 <div class="health" style="margin-top:14px">Fonte: <a class="link" target="_blank" rel="noopener" href="https://auniao.pb.gov.br/servicos/doe">A União — DOE/PB</a></div>
@@ -68,22 +68,13 @@ footer{padding:22px;text-align:center;color:#7690a0;font-size:12px}
 <script id="gediv-data" type="application/json">__GEDIV_EMBED_DATA__</script>
 <script>
 "use strict";
-const DATA=JSON.parse(document.getElementById("gediv-data").textContent);
-const actionLink = DATA.workflow_url || "";
-const updateAnchor = document.getElementById("manual-update");
-if(actionLink && actionLink.startsWith("https://github.com/")) {
-  updateAnchor.href=actionLink;
-} else {
-  updateAnchor.removeAttribute("href");
-  updateAnchor.style.opacity=".55";
-  updateAnchor.title="Disponível após executar no GitHub";
-  updateAnchor.addEventListener("click",e=>{e.preventDefault();alert("O botão será ativado após publicar o projeto em um repositório privado e executar pelo GitHub Actions.");});
-}
-const ALL=DATA.registros||[], EVENTS=DATA.eventos||[];
+let DATA={};try{DATA=JSON.parse(document.getElementById('gediv-data').textContent);}catch{}
+let ALL=DATA.registros||[],EVENTS=DATA.eventos||[],snapshot=null,client=null,scope='conferido';
+
 const TS=["Anotação de Tempo","Desaverbação","Licença para Interesses Particulares","Desistência de Licença","Licença Especial","Conversão de Licença Especial","Conversão de Férias"];
-const isPrivate=DATA.mode==="privado";
+let isPrivate=DATA.mode==="privado";
 const $=id=>document.getElementById(id);
-let view="resenha",card="",selectedRes="",displayed=[];
+let view="resenha",card="",selectedRes="",displayed=[],selectedRows=[];
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const unique=xs=>[...new Set(xs.filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
 const badge=v=>'<span class="badge '+(v==="Deferido"?"good":v==="Indeferido"?"bad":v.includes("pendente")?"warn":"")+'">'+esc(v||"—")+'</span>';
@@ -102,7 +93,7 @@ function filtered(){
 function metrics(rows){
  return {
  processos:new Set(rows.map(r=>(isPrivate?r.processo:r.processo_key)||"")).size-(rows.some(r=>!(isPrivate?r.processo:r.processo_key))?1:0),
- resenhas:new Set(rows.filter(r=>r.resenha).map(r=>r.fonte+"|"+r.resenha)).size,
+ resenhas:new Set(rows.filter(r=>r.resenha).map(r=>r.resenha_id||r.fonte+"|"+r.resenha)).size,
  decisoes:rows.length,
  deferidos:rows.filter(r=>r.resultado==="Deferido").length,
  indeferidos:rows.filter(r=>r.resultado==="Indeferido").length,
@@ -142,10 +133,10 @@ function render(){
  displayed=filtered();let rows=displayed;
  if(card==="deferidos")rows=rows.filter(r=>r.resultado==="Deferido");
  if(card==="indeferidos")rows=rows.filter(r=>r.resultado==="Indeferido");
- if(card==="refeitos")rows=rows.filter(r=>r.alteracao==="Refeito (validado)");
- if(card==="sem_efeito")rows=rows.filter(r=>r.alteracao==="Sem efeito (validado)");
- let m=metrics(displayed);
- $("kpis").innerHTML=cardTypes.map(([key,label])=>`<button class="kpi ${card===key?"selected":""}" data-card="${key}"><span>${label}</span><b>${m[key]}</b><em>${card===key?"Filtro ativo · clique para remover":"Clique para explorar"}</em></button>`).join("");
+ if(card==="refeitos")rows=snapshot?rows.filter(r=>EVENTS.some(e=>e.act===r.act&&["Retificação","Correção","Republicação"].includes(e.type))):rows.filter(r=>r.alteracao==="Refeito (validado)");
+ if(card==="sem_efeito")rows=snapshot?rows.filter(r=>EVENTS.some(e=>e.act===r.act&&e.type==="Tornado sem efeito")):rows.filter(r=>r.alteracao==="Sem efeito (validado)");
+ let m=metrics(displayed);if(snapshot){const acts=new Set(displayed.map(r=>r.act).filter(Boolean));m.refeitos=scope==='pendente'?null:new Set(EVENTS.filter(e=>acts.has(e.act)&&['Retificação','Correção','Republicação'].includes(e.type)).map(e=>e.act)).size;m.sem_efeito=scope==='pendente'?null:new Set(EVENTS.filter(e=>acts.has(e.act)&&e.type==='Tornado sem efeito').map(e=>e.act)).size;}
+ selectedRows=rows;$("kpis").innerHTML=cardTypes.map(([key,label])=>`<button class="kpi ${card===key?"selected":""}" data-card="${key}"><span>${label}</span><b>${m[key]===null?"—":m[key]}</b><em>${card===key?"Filtro ativo · clique para remover":"Clique para explorar"}</em></button>`).join("");
  bars("axis-bars",displayed,r=>r.eixo);
  bars("sub-bars",displayed,r=>r.modalidade||r.subcategoria);
  $("count").textContent=`${rows.length} decisão(ões) na visualização selecionada`;
@@ -158,8 +149,8 @@ $("res-btn").onclick=()=>{view="resenha";render()};$("proc-btn").onclick=()=>{vi
 $("results").addEventListener("click",e=>{let head=e.target.closest(".resenha-head"),full=e.target.closest(".expand");if(full){selectedRes=full.dataset.key;openModal();return}if(head){selectedRes=selectedRes===head.dataset.key?"":head.dataset.key;render()}});
 $("results").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.matches(".resenha-head")){e.target.click()}});
 $("clear").onclick=()=>{["period","axis","mod","group","result","search"].forEach(id=>$(id).value="");card="";selectedRes="";render()};
-$("export").onclick=()=>csv(displayed);
-function openModal(){let rows=displayed;if(selectedRes)rows=rows.filter(r=>r.data+"|"+r.resenha===selectedRes);$("modal-content").innerHTML=rowsTable(rows);$("modal").classList.add("open")}
+$("export").onclick=()=>csv(selectedRows);
+function openModal(){let rows=selectedRows;if(selectedRes)rows=rows.filter(r=>r.data+"|"+r.resenha===selectedRes);$("modal-content").innerHTML=rowsTable(rows);$("modal").classList.add("open")}
 $("full").onclick=openModal;$("close").onclick=()=>{$("modal").classList.remove("open")};
 $("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("close").click()});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")$("close").click()});
@@ -171,5 +162,29 @@ const rest = (typeof cob.edicoes_pendentes_intervalo === "number")
   : "";
 $("coverage").innerHTML=`Cobertura: ${DATA.edicoes?.length||0} edição(ões) registradas; ${(DATA.edicoes||[]).filter(e=>e.status==="ERRO").length} falha(s) de coleta${rest}. <strong>Indicadores provisórios: registros pendentes de revisão humana.</strong>`;
 $("privacy-note").textContent=isPrivate?"ATENÇÃO: este arquivo contém nomes, matrículas e processos. Guarde em local de acesso restrito; não publique este HTML no GitHub Pages.":"Versão pública: nomes, matrículas e processos não são disponibilizados. Para consultar detalhes, use o arquivo privado recebido da execução.";
-render();
+function applySnapshot(){
+ const converted=client.legacyView(snapshot,scope);ALL=converted.records;EVENTS=converted.events;
+ isPrivate=snapshot.meta.access==='manager';
+ $('scope').hidden=!isPrivate;$('scope').value=scope;
+ $('mode').textContent=scope==='pendente'?'EM CONFERÊNCIA · DADOS PRELIMINARES':'DECISÕES CONFERIDAS';
+ $('coverage').textContent=snapshot.meta.coverage||'Cobertura histórica parcial.';
+ $('privacy-note').textContent=isPrivate?'Acesso autorizado. Candidatos continuam pendentes de conferência.':'Somente decisões conferidas são disponibilizadas nesta consulta.';
+ selectedRes='';render();
+}
+let pendingRead;
+async function refresh(initial=false){
+ pendingRead?.abort();pendingRead=new AbortController();const controller=pendingRead;
+ $('manual-update').disabled=true;$('refresh-status').textContent='Consultando backend…';
+ try{
+  client=client||await import('../shared/gediv-client.mjs');const next=await client.fetchSnapshot({signal:controller.signal});if(controller.signal.aborted)return;
+  snapshot=next;if(initial||next.meta.access!=='manager')scope=next.dashboard.defaultScope;
+  applySnapshot();$('update').textContent=new Date().toLocaleString('pt-BR');
+  $('refresh-status').textContent='Leitura sincronizada.';
+ }catch(error){if(!controller.signal.aborted)$('refresh-status').textContent=error.message+' A última leitura foi mantida.';}
+ finally{if(!controller.signal.aborted)$('manual-update').disabled=false;}
+}
+$('manual-update').onclick=()=>refresh();
+$('scope').onchange=e=>{scope=e.target.value;card='';applySnapshot();};
+render();if(location.protocol!=='file:')void refresh(true);
 </script></body></html>
+

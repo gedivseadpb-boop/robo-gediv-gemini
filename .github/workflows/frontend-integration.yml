@@ -1,0 +1,21 @@
+name: Integração das interfaces GEDIV
+on:
+  pull_request:
+    paths:
+      - 'painel-interativo/**'
+      - 'site/**'
+      - 'shared/**'
+      - 'server/**'
+      - 'tests/integration.test.mjs'
+      - '.github/workflows/frontend-integration.yml'
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node --test tests/integration.test.mjs
