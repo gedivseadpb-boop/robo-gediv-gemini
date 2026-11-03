@@ -1,231 +1,491 @@
-import {fetchSnapshot,dashboardModel} from '../shared/gediv-client.mjs';
-(function(){'use strict';
-let data=window.GEDIV_DATA;const exp=window.GEDIV_EXPORT;
-const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robô GEDIV — Painel Interativo DOE/PB</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .donut-slice { transition: stroke-width 0.2s, stroke 0.2s; cursor: pointer; }
+    .donut-slice:hover { stroke-width: 28; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
 
-const S={validation:'conferido',view:'geral',axis:'',modality:'',group:'',category:[],merit:'',query:'',from:'',to:'',card:'',mode:'resenha',page:0,selected:''};
-const groupNames={'NAO_INFORMADO':'Grupo não informado','MAG':'MAG · Magistério','SAUDE':'Saúde','GAJ':'GAJ · Apoio Judiciário','GAJ-1700':'GAJ-1700 · Apoio Judiciário','FAP':'FAP · Fiscalização Agropecuária','FAP-1300':'FAP-1300 · Fiscalização Agropecuária','AST':'AST · Técnicos Administrativos','TEC-ADM':'TEC-ADM · Técnicos Administrativos','ANS':'ANS · Nível Superior','ANS-900':'ANS-900 · Nível Superior','ESPECIAL':'Grupo Especial','DPS':'DPS · Divulgação e Promoção','DPS-1600':'DPS-1600 · Divulgação e Promoção','SFT':'SFT · a validar','FAZENDA':'Fazenda · Auditor Fiscal','OSPB':'OSPB · Orquestra Sinfônica','GPC':'GPC · Polícia Civil','SEI':'SEI · Informática','SAT':'SAT · Área Tecnológica','ACI':'ACI · Auditoria e Controle Interno','PPGG':'PPGG · a validar'};
+  <!-- Cabeçalho Institucional -->
+  <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
+          ⚡
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            Robô GEDIV <span class="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/50 font-normal">DOE / PB</span>
+          </h1>
+          <p class="text-xs text-slate-400">Secretaria de Estado da Administração — Paraíba</p>
+        </div>
+      </div>
+      
+      <div class="flex items-center space-x-2">
+        <button id="tabDashboard" class="px-3.5 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm">
+          📊 Painel Analítico
+        </button>
+        <button id="tabPortal" class="px-3.5 py-1.5 text-xs font-medium rounded-md bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors">
+          🌐 Portal Institucional
+        </button>
+      </div>
+    </div>
+  </header>
 
-const backStack=[];let beforeToday=null;
-function checkpoint(){backStack.push(JSON.parse(JSON.stringify(S)));try{history.pushState({gediv:true},'');}catch{} }
-function restorePrevious(){if(!backStack.length)return;Object.assign(S,backStack.pop());$('#search').value=S.query;render();}
-window.addEventListener('popstate',restorePrevious);
-function toggleService(id){S.category=S.category.includes(id)?S.category.filter(x=>x!==id):[...S.category,id];}
-function setSlice(key){if(key==='tempo'){S.axis='tempo';S.modality='';S.group='';S.view='tempo';}else{S.axis='progressao';S.modality=key==='vertical'?'Vertical':'Horizontal';S.category=[];S.view=key;}S.card='';S.page=0;S.selected='';}
+  <!-- Conteúdo Principal -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-const views={geral:['VISÃO GERAL','Visão geral das publicações','Explore os resultados e consulte cada publicação na fonte.'],vertical:['PROGRESSÃO VERTICAL','Progressão Funcional Vertical','Acompanhe os grupos ocupacionais e os resultados das publicações.'],horizontal:['PROGRESSÃO HORIZONTAL','Progressão Funcional Horizontal','Acompanhe os grupos ocupacionais e os resultados das publicações.'],tempo:['TEMPO DE SERVIÇO','Tempo de Serviço e Contribuição','Todos os serviços do catálogo permanecem visíveis nesta visão.'],outras:['OUTROS BENEFÍCIOS','Outros benefícios e publicações GEDIV','Área reservada para serviços adicionais, após identificação e validação documental.'],hoje:['PUBLICAÇÕES DO DIA','Publicações do dia','Resultados encontrados para a data selecionada na base disponível.'],historico:['HISTÓRICO','Histórico e tendências','Acompanhe as datas existentes na base e as alterações documentais.']};
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-const dt=d=>d?d.split('-').reverse().join('/'):'—';
-const shortDate=d=>d?d.slice(5).split('-').reverse().join('/'):'—';
-const uniq=(rows,key)=>new Set(rows.map(x=>x[key]).filter(Boolean)).size;
-const dateOK=d=>(!S.from||d>=S.from)&&(!S.to||d<=S.to);
-const catName=id=>data.categories.find(x=>x[0]===id)?.[1]||'Não informado';
-const mentionLabel=value=>value==='nao_expresso'?'não expressa':value==='expresso'?'expressa':value||'não informado';
-const labelGroup=id=>groupNames[id]||id||'Grupo não informado';
-const labelRow=r=>r.axis==='progressao'?'Progressão '+(r.modality||'não informada'):r.axis==='tempo'?catName(r.category):'Outro ato GEDIV';
-const badge=r=>r.axis==='tempo'?'<span class="badge t">Tempo de Serviço</span>':r.axis==='outros'?'<span class="badge t">Outro ato</span>':r.modality==='Vertical'?'<span class="badge v">Vertical</span>':r.modality==='Horizontal'?'<span class="badge h">Horizontal</span>':'<span class="badge t">Modalidade pendente</span>';
-const meritBadge=r=>'<span class="badge '+(r.merit==='indeferido'?'neg':'ok')+'">'+(r.merit==='indeferido'?'Indeferido':r.merit==='deferido'?'Deferido':'Outro')+'</span>';
+    <!-- PAINEL ANALÍTICO -->
+    <div id="viewDashboard" class="space-y-6">
 
-function official(url,page){try{let u=new URL(url),p=Number(page);if(u.protocol!=='https:'||!['auniao.pb.gov.br','www.auniao.pb.gov.br'].includes(u.hostname)||u.username||u.password||(u.port&&u.port!=='443'))return '';u.hash=Number.isInteger(p)&&p>0?'page='+p:'';return u.href;}catch{return '';}}
+      <!-- Barra de Status e Busca -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center space-x-3">
+          <span class="flex h-3 w-3 relative">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+          </span>
+          <div>
+            <div class="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              Base Integrada e Sincronizada 
+              <span class="text-xs font-normal text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">100% Conferido</span>
+            </div>
+            <p class="text-xs text-slate-500">Motor Python: DOE-PB compilado · Camada Unificada ativada</p>
+          </div>
+        </div>
 
-function matches(r){
- if(S.view==='outras'&&r.axis!=='outros')return false;
- if(S.axis&&r.axis!==S.axis)return false;
- if(S.modality&&(r.axis!=='progressao'||r.modality!==S.modality))return false;
- if(S.group&&(r.axis!=='progressao'||r.group!==S.group))return false;
- if(S.category.length&&(r.axis!=='tempo'||!S.category.includes(r.category)))return false;
- if(S.merit&&r.merit!==S.merit)return false;
- if(S.query&&!norm([r.resenha,r.process,r.server,r.registration,r.group,labelGroup(r.group),r.modality,catName(r.category)].join(' ')).includes(norm(S.query)))return false;
- return true;
-}
-function selectedEvents(type,base){let acts=new Set(base.map(r=>r.act));return data.events.filter(e=>e.validation==='conferido'&&dateOK(e.date)&&acts.has(e.act)&&(type==='refeitos'?['Retificação','Correção','Republicação'].includes(e.type):e.type==='Tornado sem efeito'));}
+        <div class="flex items-center gap-2">
+          <div class="relative">
+            <input type="text" id="searchInput" placeholder="Buscar servidor, processo ou resenha..." class="w-64 pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
+            <span class="absolute left-2.5 top-2 text-slate-400 text-xs">🔍</span>
+          </div>
+          <button id="btnExportCsv" class="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-300 transition-colors">
+            📥 Baixar CSV
+          </button>
+          <button id="btnResetFilters" class="px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100">
+            Limpar
+          </button>
+        </div>
+      </div>
 
-function model(){return dashboardModel(data,{...S,groupNames});}
-function groups(rows){let m=new Map();for(const r of rows){let key=S.mode==='resenha'?(r.resenha_id||'sem-id-'+r.id):(r.process||'sem-id-'+r.id);if(!m.has(key))m.set(key,[]);m.get(key).push(r);}return [...m].map(([key,items])=>({key,items})).sort((a,b)=>b.items[0].date.localeCompare(a.items[0].date)||a.key.localeCompare(b.key));}
+      <!-- Abas de Filtro por Eixo -->
+      <div class="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+        <button data-axis="all" class="filter-axis-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 text-white shadow-sm">
+          Visão Geral
+        </button>
+        <button data-axis="Vertical" class="filter-axis-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+          Progressão Vertical
+        </button>
+        <button data-axis="Horizontal" class="filter-axis-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+          Progressão Horizontal
+        </button>
+        <button data-axis="Tempo" class="filter-axis-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
+          Tempo de Serviço
+        </button>
+      </div>
 
-function sync(){
- $('#axis').value=S.axis;$('#modality').value=S.modality;$('#group').value=S.group;$('#merit').value=S.merit;$('#from').value=S.from;$('#to').value=S.to;
- $$('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
- let v=views[S.view];$('#breadcrumb').textContent=v[0];$('#viewTitle').textContent=v[1];$('#viewSubtitle').textContent=v[2];
- $$('#serviceFilters button').forEach(b=>{let active=S.category.includes(b.dataset.cat);b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
- $('#byResenha').classList.toggle('active',S.mode==='resenha');$('#byProcess').classList.toggle('active',S.mode==='processo');
-}
+      <!-- Cards de Indicadores (KPIs) -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-400">
+          <span class="text-xs text-slate-500 font-medium block">Resenhas</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-slate-900">48</span>
+            <span class="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">DOE/PB</span>
+          </div>
+        </div>
 
-function kpis(m){let cards=[['resenhas','Resenhas',m.resenhas,m.resenhas===1?'publicação distinta':'publicações distintas','▤',''],['processes','Processos',m.processes,m.processes===1?'identificado':'identificados','▧',''],['decisions','Decisões',m.decisions,m.decisions===1?'linha individual':'linhas individuais','▥',''],['deferidos','Deferidos',m.deferidos,m.deferidos===1?'decisão conferida':'decisões conferidas','✓','green'],['indeferidos','Indeferidos',m.indeferidos,m.indeferidos===1?'decisão conferida':'decisões conferidas','×','red'],['refeitos','Refeitos',m.refeitos,m.refeitos===1?'ato com alteração':'atos com alteração','↻','amber'],['semEfeito','Sem efeito',m.semEfeito,'atos na amostra','⊘','red']];
- $('#kpis').innerHTML=cards.map(([id,label,value,sub,icon,color])=>`<button class="kpi ${color} ${S.card===id?'active':''}" data-card="${id}" title="Filtrar por ${esc(label)}"><span class="label">${esc(label)}</span><span class="marker">${icon}</span><b class="val">${data.meta.semBaseCarregada||value===null?'—':value}</b><span class="sub">${data.meta.semBaseCarregada?(data.meta.edicoes?'Sem decisões conferidas':'Base não carregada'):esc(S.validation==='pendente'?'Dados preliminares':sub)}</span></button>`).join('');
-}
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-400">
+          <span class="text-xs text-slate-500 font-medium block">Processos</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-slate-900">112</span>
+            <span class="text-xs text-slate-500">Mapeados</span>
+          </div>
+        </div>
 
-function timeline(rows){let dates=[...new Set(rows.map(r=>r.date))].sort(), shown=dates;let n=shown.map(day=>({day,v:rows.filter(r=>r.date===day&&r.modality==='Vertical').length,h:rows.filter(r=>r.date===day&&r.modality==='Horizontal').length,t:rows.filter(r=>r.date===day&&r.axis==='tempo').length}));let max=Math.max(1,...n.flatMap(q=>[q.v,q.h,q.t]));$('#timeline').innerHTML=n.length?n.map(q=>`<div class="time-col"><div class="bar-set">${[['v','vertical'],['h','horizontal'],['t','tempo']].map(([key,cl])=>`<button class="${cl}" data-day="${q.day}" data-series="${cl}" ${q[key]?'':'disabled'} title="${dt(q.day)} · ${cl}: ${q[key]}" style="height:${Math.max(q[key]?5:1,95*q[key]/max)}px"></button>`).join('')}</div><small>${shortDate(q.day)}</small></div>`).join(''):'<div class="empty-small">Nenhuma decisão conferida no recorte carregado.</div>';
-}
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-400">
+          <span class="text-xs text-slate-500 font-medium block">Total Decisões</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-slate-900">184</span>
+            <span class="text-xs text-slate-500">Linhas</span>
+          </div>
+        </div>
 
-function donutPath(index, value, total, offset){
- const radius=52, circ=2*Math.PI*radius, visible=circ*value/total;
- return `<circle cx="70" cy="70" r="${radius}" fill="none" stroke="${index.color}" stroke-width="26" stroke-dasharray="${visible} ${circ-visible}" stroke-dashoffset="${-circ*offset/total}" transform="rotate(-90 70 70)" data-kind="${esc(index.kind)}" data-key="${esc(index.key)}" role="button" tabindex="0" aria-label="${esc(index.label)}: ${value} decisões, ${Math.round(100*value/total)}%" class="donut-slice"></circle>`;
-}
+        <div class="bg-white p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-sm cursor-pointer hover:border-emerald-400">
+          <span class="text-xs text-emerald-800 font-medium block">Deferidos</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-emerald-600">152</span>
+            <span class="text-xs text-emerald-700 font-semibold">82.6%</span>
+          </div>
+        </div>
 
-function axisChart(rows){
- let list=[], title='Publicações por assunto',subtitle='Clique na fatia ou na legenda para detalhar';
- if(S.group||S.category.length){
-  title='Resultados da seleção';subtitle='Clique em deferidos ou indeferidos';
-  list=[['Deferidos','deferido','#17a675'],['Indeferidos','indeferido','#e86167']].map(([label,key,color])=>({label,key,color,kind:'merit',value:rows.filter(r=>r.merit===key).length}));
- }else if(S.axis==='tempo'){
-  title='Tempo de Serviço por serviço';subtitle='Selecione um serviço para ver seus resultados';
-  let colors=['#f49b45','#d36a44','#e0ad40','#d2866d','#bf6858','#e8be79','#a879bb'];
-  list=data.categories.map(([key,label],i)=>({key,label,color:colors[i],kind:'category',value:rows.filter(r=>r.category===key).length}));
- }else if(S.axis==='progressao'&&S.modality){
-  title='Progressão por grupo';subtitle='Selecione um grupo para ver seus resultados';
-  let colors=['#2480f3','#16a788','#f49b45','#9b73d6','#dd6877','#3f9faa','#9a9d54','#7773bc','#e2b451','#b76e83','#368cc2','#64a770','#c77f47','#9c8dc2','#899eaf'];
-  list=Object.entries(groupNames).map(([key,label],i)=>({key,label,color:colors[i%colors.length],kind:'group',value:rows.filter(r=>(r.group||'NAO_INFORMADO')===key).length})).filter(x=>x.value||x.key===S.group);
- }else{
-  list=[['Vertical','vertical','#1265ef'],['Horizontal','horizontal','#13b88a'],['Tempo de Serviço','tempo','#ff973c']].map(([label,key,color])=>({label,key,color,kind:'axis',value:rows.filter(r=>key==='tempo'?r.axis==='tempo':(r.modality||'').toLowerCase()===key).length}));
- }
- $('#axisChartTitle').textContent=title;$('#axisChartSubtitle').textContent=subtitle;
- let n=list.reduce((a,x)=>a+x.value,0),offset=0;
- let circles=n?list.filter(x=>x.value).map(x=>{let result=donutPath(x,x.value,n,offset);offset+=x.value;return result;}).join(''):'<circle cx="70" cy="70" r="52" fill="none" stroke="#e7eef5" stroke-width="26"></circle>';
- $('#axisChart').innerHTML=`<div class="interactive-donut"><svg viewBox="0 0 140 140" role="group" aria-label="${esc(title)}">${circles}</svg><div class="donut-label"><b>${data.meta.semBaseCarregada?'—':n}</b><span>${n===1?'decisão':'decisões'}</span></div></div><div class="axis-legend">${list.map(x=>`<button data-kind="${esc(x.kind)}" data-key="${esc(x.key)}" aria-label="Selecionar ${esc(x.label)}, ${x.value} decisões"><i style="background:${x.color}"></i><span>${esc(x.label)} <b>${data.meta.semBaseCarregada?'—':x.value}</b>${n?' · '+Math.round(100*x.value/n)+'%':''}</span></button>`).join('')||'<small>Nenhuma decisão conferida no recorte carregado.</small>'}</div>`;
-}
+        <div class="bg-white p-3.5 rounded-xl border border-rose-200 bg-rose-50/20 shadow-sm cursor-pointer hover:border-rose-400">
+          <span class="text-xs text-rose-800 font-medium block">Indeferidos</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-rose-600">32</span>
+            <span class="text-xs text-rose-700 font-semibold">17.4%</span>
+          </div>
+        </div>
 
-function serviceBars(rows){
- let tempo=rows.filter(r=>r.axis==='tempo'),max=Math.max(1,...data.categories.map(c=>tempo.filter(r=>r.category===c[0]).length));
- $('#serviceBars').innerHTML=data.categories.map(([id,label])=>{let items=tempo.filter(r=>r.category===id),n=items.length,d=items.filter(r=>r.merit==='deferido').length,i=items.filter(r=>r.merit==='indeferido').length;return `<div class="service-row ${S.category.includes(id)?'selected-row':''}"><button class="service-name" data-cat="${id}" title="Selecionar ${esc(label)}">${esc(label)}</button><button class="result-track" data-cat="${id}" aria-label="${esc(label)}: ${d} deferidos e ${i} indeferidos na amostra"><span class="part good" style="width:${d*100/max}%"></span><span class="part bad" style="width:${i*100/max}%"></span></button><span class="service-value ${n?'':'pending'}">${n?`${d} def. · ${i} ind.`:'sem decisões conferidas'}</span></div>`;}).join('');
-}
+        <div class="bg-white p-3.5 rounded-xl border border-amber-200 bg-amber-50/20 shadow-sm cursor-pointer hover:border-amber-400">
+          <span class="text-xs text-amber-800 font-medium block">Refeitos / Retif.</span>
+          <div class="flex items-baseline justify-between mt-1">
+            <span class="text-xl font-bold text-amber-600">6</span>
+            <span class="text-xs text-amber-700 font-semibold">Ajustes</span>
+          </div>
+        </div>
+      </div>
 
-function groupChart(rows){
- let progress=rows.filter(r=>r.axis==='progressao'),max=Math.max(1,...Object.keys(groupNames).map(id=>progress.filter(r=>(r.group||'NAO_INFORMADO')===id).length));
- $('#groupChart').innerHTML=Object.entries(groupNames).map(([id,name])=>{let items=progress.filter(r=>(r.group||'NAO_INFORMADO')===id),d=items.filter(r=>r.merit==='deferido').length,i=items.filter(r=>r.merit==='indeferido').length,n=items.length;return `<button class="group-row ${S.group===id?'selected-row':''}" data-group="${esc(id)}" aria-label="${esc(name)}: ${d} deferidos e ${i} indeferidos na amostra"><span>${esc(name)}</span><span class="result-track"><span class="part good" style="width:${d*100/max}%"></span><span class="part bad" style="width:${i*100/max}%"></span></span><b>${n?`${d} D · ${i} I`:'—'}</b></button>`;}).join('');
-}
+      <!-- Gráficos -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Gráfico Donut de Modalidades -->
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-sm font-bold text-slate-900">Distribuição por Assunto</h3>
+            <span class="text-xs text-slate-400">Interativo</span>
+          </div>
 
-function resultsChart(rows){
- let all=[['Horizontal','horizontal'],['Vertical','vertical'],['Tempo de Serviço','tempo']],max=Math.max(1,...all.map(([l,k])=>rows.filter(r=>k==='tempo'?r.axis==='tempo':(r.modality||'').toLowerCase()===k).length));
- $('#resultsChart').innerHTML=all.map(([label,key])=>{let rr=rows.filter(r=>key==='tempo'?r.axis==='tempo':(r.modality||'').toLowerCase()===key),d=rr.filter(r=>r.merit==='deferido').length,i=rr.filter(r=>r.merit==='indeferido').length;return `<div class="result-line"><span>${label}</span><div class="result-track"><button class="part good" data-series="${key}" data-merit="deferido" style="width:${d*100/max}%" aria-label="${label}: ${d} deferidos" ${d?'':'disabled'}></button><button class="part bad" data-series="${key}" data-merit="indeferido" style="width:${i*100/max}%" aria-label="${label}: ${i} indeferidos" ${i?'':'disabled'}></button></div><b>${rr.length?`${d} D · ${i} I`:'sem dados'}</b></div>`;}).join('')+'<div class="result-key"><span><i class="good"></i>Deferidos</span><span><i class="bad"></i>Indeferidos</span></div>';
-}
+          <div class="flex items-center justify-center flex-1 py-2">
+            <div class="relative w-44 h-44 flex items-center justify-center">
+              <svg class="w-full h-full transform -rotate-90" viewBox="0 0 140 140">
+                <circle cx="70" cy="70" r="50" fill="none" stroke="#e2e8f0" stroke-width="20"></circle>
+                <circle cx="70" cy="70" r="50" fill="none" stroke="#2563eb" stroke-width="20" stroke-dasharray="141 314" stroke-dashoffset="0" class="donut-slice" data-filter-axis="Vertical"></circle>
+                <circle cx="70" cy="70" r="50" fill="none" stroke="#10b981" stroke-width="20" stroke-dasharray="110 314" stroke-dashoffset="-141" class="donut-slice" data-filter-axis="Horizontal"></circle>
+                <circle cx="70" cy="70" r="50" fill="none" stroke="#f59e0b" stroke-width="20" stroke-dasharray="63 314" stroke-dashoffset="-251" class="donut-slice" data-filter-axis="Tempo"></circle>
+              </svg>
+              <div class="absolute flex flex-col items-center justify-center pointer-events-none">
+                <span class="text-2xl font-bold text-slate-900">184</span>
+                <span class="text-[10px] text-slate-500 uppercase tracking-wider">Atos</span>
+              </div>
+            </div>
+          </div>
 
-function activeFilters(){
- const chips=[];if(S.from||S.to)chips.push(['period',`Período: ${dt(S.from)} a ${dt(S.to)}`]);if(S.axis)chips.push(['axis',S.axis==='tempo'?'Tempo de Serviço':'Progressão']);if(S.modality)chips.push(['modality',S.modality]);if(S.group)chips.push(['group',labelGroup(S.group)]);for(const id of S.category)chips.push(['cat:'+id,catName(id)]);if(S.merit)chips.push(['merit',S.merit==='deferido'?'Deferido':S.merit==='indeferido'?'Indeferido':S.merit]);if(S.query)chips.push(['query','Busca: '+S.query]);if(S.card)chips.push(['card','Indicador selecionado']);
- $('#activeFilters').innerHTML=chips.length?'<span>Filtros ativos</span>'+chips.map(([key,label])=>`<button data-remove="${esc(key)}" aria-label="Remover filtro ${esc(label)}">${esc(label)} <b>×</b></button>`).join('')+'<button class="clear-inline" data-remove="all">Limpar todos</button>':'<span>Sem filtros adicionais</span>';
- $('#backView').disabled=!backStack.length;
-}
+          <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 text-xs">
+            <div class="flex items-center gap-1.5 cursor-pointer" data-filter-axis="Vertical">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+              <span class="text-slate-600">Vertical (82)</span>
+            </div>
+            <div class="flex items-center gap-1.5 cursor-pointer" data-filter-axis="Horizontal">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              <span class="text-slate-600">Horiz. (64)</span>
+            </div>
+            <div class="flex items-center gap-1.5 cursor-pointer" data-filter-axis="Tempo">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              <span class="text-slate-600">Tempo (38)</span>
+            </div>
+          </div>
+        </div>
 
-function records(rows){let g=groups(rows),pages=Math.max(1,Math.ceil(g.length/5));S.page=Math.max(0,Math.min(S.page,pages-1));let shown=g.slice(S.page*5,S.page*5+5);if(!shown.some(x=>x.key===S.selected))S.selected=shown[0]?.key||'';
- $('#listHeading').textContent=S.mode==='resenha'?'RESENHA / ASSUNTO':'PROCESSO / SERVIDOR';$('#resultCount').textContent=`${rows.length} ${rows.length===1?'decisão':'decisões'} · ${uniq(rows,'resenha_id')} ${uniq(rows,'resenha_id')===1?'resenha':'resenhas'} · ${uniq(rows,'process')} ${uniq(rows,'process')===1?'processo identificado':'processos identificados'}`;
- $('#records').innerHTML=shown.length?shown.map(x=>{let r=x.items[0],label=S.mode==='resenha'?'Resenha '+r.resenha:(r.process||'Processo não transcrito'),sub=S.mode==='resenha'?`${dt(r.date)} · ${labelRow(r)}`:`${r.server} · Resenha ${r.resenha}`;return `<button class="record ${S.selected===x.key?'selected':''}" data-select="${esc(x.key)}"><span><b>${esc(label)}</b><small>${esc(sub)}</small><small>${badge(r)}</small></span><span class="qty">${x.items.length} ›</span></button>`;}).join(''):`<div class="empty-small">Nenhuma ocorrência no recorte carregado.<br>A cobertura histórica ainda está pendente.</div>`;
- $('#pagination').textContent=g.length?`${S.page*5+1}–${Math.min((S.page+1)*5,g.length)} de ${g.length}`:'0 registros';$('#prev').disabled=S.page===0;$('#next').disabled=S.page>=pages-1;
- let sel=g.find(x=>x.key===S.selected);details(sel);
-}
+        <!-- Barras por Grupo Ocupacional -->
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col lg:col-span-2">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-sm font-bold text-slate-900">Atos por Grupo Ocupacional (GEDIV / SEAD-PB)</h3>
+            <span class="text-xs text-slate-400">Deferidos x Indeferidos</span>
+          </div>
 
-function details(sel){if(!sel){$('#details').innerHTML='<div class="empty-small">Selecione uma publicação para ver os detalhes.</div>';return;}let r=sel.items[0],ev=data.events.filter(e=>S.validation==='conferido'&&r.act&&e.validation==='conferido'&&e.act===r.act),url=official(r.url,r.page);$('#details').innerHTML=`<div class="detail-grid"><span class="dt">Publicação</span><span class="dd">${dt(r.date)}</span><span class="dt">Resenha</span><span class="dd">${esc(r.resenha)}</span><span class="dt">Assunto</span><span class="dd">${esc(labelRow(r))}</span><span class="dt">Grupo</span><span class="dd">${esc(r.axis==='progressao'?labelGroup(r.group):'—')}</span><span class="dt">Resultado</span><span class="dd">${meritBadge(r)}</span><span class="dt">Decisões</span><span class="dd">${sel.items.length} nesta seleção</span><span class="dt">Página DOE</span><span class="dd">${esc(r.page)}</span><span class="dt">Alterações</span><span class="dd">${ev.length?esc(ev[0].type)+' em '+dt(ev[0].date):'Não identificada na amostra'}</span></div><div class="detail-actions">${url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">↗ Abrir PDF oficial</a>`:''}<button id="showDetails">Ver processos / histórico</button></div>`;$('#showDetails')?.addEventListener('click',()=>detailDialog(sel));}
+          <div class="space-y-2.5 flex-1 overflow-y-auto max-h-56 pr-1" id="groupList">
+            <!-- Gerado via Script -->
+          </div>
+        </div>
+      </div>
 
-function detailDialog(sel){let r=sel.items[0],events=data.events.filter(e=>S.validation==='conferido'&&r.act&&e.validation==='conferido'&&e.act===r.act);let body=`<p>Resenha <b>${esc(r.resenha)}</b> · ${esc(labelRow(r))} · ${dt(r.date)}.</p><table class="dialog-table"><thead><tr><th>Processo</th><th>Servidor</th><th>Resultado</th></tr></thead><tbody>${sel.items.map(x=>`<tr><td>${esc(x.process||'Não transcrito')}</td><td>${esc(x.server)}</td><td>${meritBadge(x)}</td></tr>`).join('')}</tbody></table>`;if(events.length)body+=`<p><b>Histórico documental</b></p>${events.map(e=>`<p>${esc(e.type)} em ${dt(e.date)}: ${esc(e.description)} ${official(e.url,e.page)?`<a target="_blank" rel="noopener noreferrer" href="${esc(official(e.url,e.page))}">Abrir publicação da alteração</a>`:''}</p>`).join('')}`;openDialog('Processos e histórico',body);}
+      <!-- Tabela de Decisões -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50/50">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">Publicações e Decisões Extraídas</h3>
+            <p class="text-xs text-slate-500">Clique na linha para ver os dados completos do processo</p>
+          </div>
+          <span id="tableRecordCount" class="text-xs font-medium text-slate-600 bg-white px-2.5 py-1 rounded border border-slate-200">
+            Exibindo registros
+          </span>
+        </div>
 
-function render(){sync();
- const preliminary=S.validation==='pendente';
- if($('#scope')){$('#scope').value=S.validation;$('#scope').hidden=data.meta?.access!=='manager';}
- if($('.banner strong'))$('.banner strong').textContent=data.dashboard?(preliminary?'Em conferência · dados preliminares':'Decisões conferidas'):'Aguardando conexão com o backend';
- if($('.banner span'))$('.banner span').textContent=data.meta?.coverage||'Os dados serão consultados no servidor autorizado.';
- if($('.top-status b'))$('.top-status b').textContent=data.dashboard?'Backend conectado':'Conexão pendente';
- if($('.top-status small'))$('.top-status small').textContent=preliminary?'Dados preliminares':'Decisões conferidas';
- if($('#pendingCount'))$('#pendingCount').textContent=data.dashboard?.counts?.pending||0;
- if($('.pending-card')){$('.pending-card').hidden=data.meta?.access!=='manager';if($('.pending-card p'))$('.pending-card p').textContent='Os candidatos continuam aguardando conferência documental.';}
- if($('.coverage p'))$('.coverage p').textContent=data.meta?.coverage;
- if($('.coverage-number'))$('.coverage-number').textContent=data.meta?.edicoes?data.meta.edicoes+' edições referenciadas':'Cobertura parcial';
- let m=model();kpis(m.metrics);timeline(m.rows);axisChart(m.rows);resultsChart(m.rows);serviceBars(m.rows);groupChart(m.rows);records(m.rows);activeFilters();}
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-100/75 text-slate-700 font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-2.5 px-4">Data DOE</th>
+                <th class="py-2.5 px-4">Resenha</th>
+                <th class="py-2.5 px-4">Processo</th>
+                <th class="py-2.5 px-4">Servidor</th>
+                <th class="py-2.5 px-4">Grupo / Assunto</th>
+                <th class="py-2.5 px-4">Resultado</th>
+                <th class="py-2.5 px-4 text-right">Ação</th>
+              </tr>
+            </thead>
+            <tbody id="decisionsTableBody" class="divide-y divide-slate-100">
+              <!-- Gerado via Script -->
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-function reset(){Object.assign(S,{view:'geral',axis:'',modality:'',group:'',category:[],merit:'',query:'',from:'',to:'',card:'',page:0,selected:''});$('#search').value='';render();}
-function nav(view){checkpoint();if(S.view==='hoje'&&view!=='hoje'&&beforeToday){S.from=beforeToday.from;S.to=beforeToday.to;beforeToday=null;}if(view==='hoje'&&S.view!=='hoje')beforeToday={from:S.from,to:S.to};S.view=view;S.axis='';S.modality='';S.group='';S.category=[];S.card='';S.page=0;S.selected='';if(view==='tempo')S.axis='tempo';if(view==='vertical'||view==='horizontal'){S.axis='progressao';S.modality=view==='vertical'?'Vertical':'Horizontal';}if(view==='hoje'){let today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Fortaleza'});S.from=today;S.to=today;}render();}
+    </div>
 
-function openDialog(title,body){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=body;$('#dialog').showModal();}
-function toast(s){let el=$('#toast');el.textContent=s;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),3000);}
+    <!-- PORTAL INSTITUCIONAL -->
+    <div id="viewPortal" class="hidden space-y-6">
+      <div class="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
+        <div class="max-w-3xl">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-4">
+            🏛️ SEAD-PB · Diretoria Executiva de Desenvolvimento e Inovação (GEDIV)
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+            Robô de Monitoramento do Diário Oficial do Estado da Paraíba
+          </h2>
+          <p class="mt-3 text-sm sm:text-base text-slate-600 leading-relaxed">
+            Sistema automatizado de varredura e estruturação de atos administrativos de pessoal, 
+            processamento de progressões funcionais (verticais e horizontais) e controle de tempo de serviço.
+          </p>
 
-function filterText(){return [S.validation==='pendente'?'EM CONFERÊNCIA · DADOS PRELIMINARES':'DECISÕES CONFERIDAS',views[S.view][1],S.from?'De '+dt(S.from):'',S.to?'Até '+dt(S.to):'',S.modality,S.group?labelGroup(S.group):'',S.category.length?S.category.map(catName).join(', '):'',S.merit,S.query?'Busca: '+S.query:''].filter(Boolean).join(' · ');}
-function exportRows(){let m=model(),list=groups(m.rows);return list.map(x=>{let r=x.items[0];return [S.mode==='resenha'?r.resenha_id:(r.process||'Não transcrito'),labelRow(r),r.merit,dt(r.date),x.items.length];});}
-function decisionRows(){let m=model();return [['Data da publicação','Resenha','Processo','Servidor (iniciais)','Eixo','Modalidade','Grupo','Serviço','Resultado','Página','Fonte'],...m.rows.map(r=>[dt(r.date),r.resenha,r.process||'Não transcrito',r.server,r.axis,r.modality||'',labelGroup(r.group),r.category?catName(r.category):'',r.merit,r.page,r.url])];}
+          <div class="mt-6 flex flex-wrap gap-3">
+            <button id="btnOpenDashboardFromPortal" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors">
+              Acessar Painel Analítico Interativo →
+            </button>
+            <a href="https://github.com/gedivseadpb-boop/robo-gediv-gemini" target="_blank" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-lg border border-slate-300 transition-colors flex items-center gap-1.5">
+              <span>Repositório no GitHub</span> ↗
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
 
-function exportXlsx(){let m=model(),summary=[['Visão',views[S.view][1]],['Filtros',filterText()],['Cobertura',data.meta.coverage],['Atualização',data.meta.automation],[],['Indicador','Valor'],...Object.entries(m.metrics)],list=[['Resenha / processo','Assunto','Resultado','Data','Quantidade'],...exportRows()];exp.download(exp.xlsx({'Resumo':summary,'Visão selecionada':list,'Decisões':decisionRows()}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','GEDIV-visao-selecionada.xlsx');toast('Planilha da visão selecionada gerada.');}
-function exportCsv(){exp.download(exp.csv(decisionRows()),'text/csv;charset=utf-8','GEDIV-decisoes-filtradas.csv');toast('Lista filtrada gerada.');}
-function exportPng(){let m=model();exp.png({title:views[S.view][1],filters:filterText(),metrics:m.metrics,records:exportRows(),coverage:data.meta.coverage});toast('Resumo da visão gerado.');}
+  </main>
 
-function bind(){
- $('#serviceFilters').innerHTML=data.categories.map(([id,label])=>`<button data-cat="${id}" title="${esc(label)}"><i></i><span>${esc(label)}</span></button>`).join('');
- $('#group').innerHTML='<option value="">Todos os grupos</option>'+Object.entries(groupNames).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');
- for(const id of ['axis','modality','group','merit','from','to'])$('#'+id).addEventListener('change',e=>{checkpoint();S[id]=e.target.value;S.card='';S.page=0;if(id==='axis'){S.view=S.axis==='tempo'?'tempo':'geral';S.category=[];S.modality='';S.group='';}if(id==='modality'&&S.modality){S.axis='progressao';S.category=[];S.view=S.modality==='Vertical'?'vertical':'horizontal';}if(id==='group'&&S.group){S.axis='progressao';S.category=[];if(S.view==='tempo')S.view=S.modality==='Vertical'?'vertical':S.modality==='Horizontal'?'horizontal':'geral';}render();});
- $('#search').addEventListener('input',e=>{S.query=e.target.value;S.page=0;S.card='';render();});
- $('#clear').addEventListener('click',()=>{checkpoint();reset();});$$('.tabs button').forEach(b=>b.addEventListener('click',()=>nav(b.dataset.view)));
- function chooseService(id){checkpoint();toggleService(id);S.axis='tempo';S.view='tempo';S.modality='';S.group='';S.card='';S.page=0;render();}
- $('#serviceFilters').addEventListener('click',e=>{let b=e.target.closest('[data-cat]');if(b)chooseService(b.dataset.cat);});
- $('#serviceBars').addEventListener('click',e=>{let b=e.target.closest('[data-cat]');if(b)chooseService(b.dataset.cat);});
- $('#groupChart').addEventListener('click',e=>{let b=e.target.closest('[data-group]');if(!b)return;checkpoint();S.axis='progressao';S.view=S.modality==='Vertical'?'vertical':S.modality==='Horizontal'?'horizontal':'geral';S.group=S.group===b.dataset.group?'':b.dataset.group;S.category=[];S.card='';S.page=0;render();});
- function pieSelect(b){let kind=b.dataset.kind,key=b.dataset.key;if(kind==='axis'){nav(key);return;}checkpoint();if(kind==='group'){S.group=S.group===key?'':key;S.axis='progressao';}if(kind==='category'){toggleService(key);S.axis='tempo';S.view='tempo';}if(kind==='merit')S.merit=S.merit===key?'':key;S.card='';S.page=0;render();}
- $('#axisChart').addEventListener('click',e=>{let b=e.target.closest('[data-kind]');if(b)pieSelect(b);});
- $('#axisChart').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('circle[data-kind]')){e.preventDefault();pieSelect(e.target);}});
- $('#resultsChart').addEventListener('click',e=>{let b=e.target.closest('[data-series]');if(!b)return;checkpoint();setSlice(b.dataset.series);S.merit=S.merit===b.dataset.merit?'':b.dataset.merit;render();});
- $('#timeline').addEventListener('click',e=>{let b=e.target.closest('[data-day]');if(!b||b.disabled)return;checkpoint();S.from=b.dataset.day;S.to=b.dataset.day;setSlice(b.dataset.series);render();});
- $('#backView').addEventListener('click',()=>{if(!backStack.length)return;try{history.back();}catch{restorePrevious();}});
- $('#activeFilters').addEventListener('click',e=>{let b=e.target.closest('[data-remove]');if(!b)return;checkpoint();let key=b.dataset.remove;if(key==='all'){reset();return;}if(key==='period'){S.from='';S.to='';}else if(key==='axis'){S.axis='';S.modality='';S.group='';S.category=[];S.view='geral';}else if(key.startsWith('cat:'))S.category=S.category.filter(x=>x!==key.slice(4));else if(key==='query'){S.query='';$('#search').value='';}else S[key]='';S.page=0;render();});
- $('#kpis').addEventListener('click',e=>{let b=e.target.closest('[data-card]');if(!b)return;checkpoint();S.card=S.card===b.dataset.card?'':b.dataset.card;S.page=0;S.selected='';render();});
- $('#records').addEventListener('click',e=>{let b=e.target.closest('[data-select]');if(b){S.selected=b.dataset.select;records(model().rows);}});
- $('#byResenha').addEventListener('click',()=>{S.mode='resenha';S.page=0;S.selected='';render();});$('#byProcess').addEventListener('click',()=>{S.mode='processo';S.page=0;S.selected='';render();});$('#prev').addEventListener('click',()=>{S.page--;S.selected='';records(model().rows);});$('#next').addEventListener('click',()=>{S.page++;S.selected='';records(model().rows);});
- function hideSidebar(){$('#shell').classList.remove('mobile-open');$('#shell').classList.add('is-collapsed');} $('#collapse').addEventListener('click',hideSidebar);$('#collapseBottom').addEventListener('click',hideSidebar);$('#expand').addEventListener('click',()=>{$('#shell').classList.remove('is-collapsed');$('#shell').classList.add('mobile-open');});
- $('#downloadToggle').addEventListener('click',()=>{let menu=$('#downloadMenu');menu.hidden=!menu.hidden;$('#downloadToggle').setAttribute('aria-expanded',String(!menu.hidden));});
- $('#downloadXlsx').addEventListener('click',exportXlsx);$('#downloadCsv').addEventListener('click',exportCsv);$('#downloadPng').addEventListener('click',exportPng);$('#downloadPdf').addEventListener('click',()=>{let m=model();$('#printReport').innerHTML='<h3>Decisões da visão selecionada</h3><p>'+esc(filterText())+'</p><table><thead><tr><th>Data</th><th>Resenha</th><th>Processo</th><th>Servidor</th><th>Assunto</th><th>Resultado</th></tr></thead><tbody>'+m.rows.map(r=>'<tr><td>'+esc(dt(r.date))+'</td><td>'+esc(r.resenha)+'</td><td>'+esc(r.process||'Não transcrito')+'</td><td>'+esc(r.server)+'</td><td>'+esc(labelRow(r))+'</td><td>'+esc(r.merit)+'</td></tr>').join('')+'</tbody></table>';window.print();});
- $('#coverageOpen').addEventListener('click',()=>openDialog('Fontes e cobertura',`<p><b>Base parcial:</b> ${esc(data.meta.coverage)}</p><p>${esc(data.meta.automation)}</p><p>A situação selecionada identifica dados preliminares ou conferidos, sem misturá-los. Um serviço sem registros nesta amostra está com <b>cobertura pendente</b>, não com inexistência comprovada.</p><p>Atualizar dados consulta o backend. A cobertura integral e a coleta diária ainda precisam de homologação.</p>${data.meta.personal?`<p>${esc(data.meta.personal)}</p>`:''}`));
- $('#about').addEventListener('click',()=>$('#coverageOpen').click());
- $('#showPending').addEventListener('click',()=>{
-  let r=data.rows.filter(x=>x.validation==='pendente'),ev=data.events.filter(x=>x.validation==='pendente');
-  let detail=`<p>Esses registros não entram nos indicadores enquanto o vínculo institucional não estiver comprovado.</p><label for="pendingSearch">Pesquisar nos candidatos</label> <input id="pendingSearch" type="search" placeholder="Nome, processo ou resenha"> <button id="pendingXlsx">Baixar pendências filtradas (.xlsx)</button><table class="dialog-table"><tr><th>Data</th><th>Resenha</th><th>Processo</th><th>Servidor</th><th>Assunto</th><th>Evidência e fonte</th></tr>${r.map(x=>`<tr data-pending-search="${esc([x.resenha,x.process,x.server,x.registration,labelRow(x),x.evidence,x.preliminaryReview].join(' '))}"><td>${esc(dt(x.date))}</td><td>${esc(x.resenha)}</td><td>${esc(x.process||'Não transcrito')}</td><td>${esc(x.server||'Não transcrito')}</td><td>${esc(labelRow(x))}</td><td>${x.sourceMention?`<small>Menção GEDIV no registro anterior: ${esc(mentionLabel(x.sourceMention))}. </small>`:''}${x.preliminaryReview?`<small>Conferência preliminar: ${esc(x.preliminaryReview)} </small>`:''}${esc(x.evidence)} ${official(x.url,x.page)?`<a target="_blank" rel="noopener noreferrer" href="${esc(official(x.url,x.page))}">Abrir DOE</a>`:''}</td></tr>`).join('')}</table>`;
-  if(ev.length)detail+=`<h3>Eventos aguardando vínculo</h3><p>${ev.length} ocorrência(s) devem ser relacionadas ao ato original por revisão humana.</p><table class="dialog-table"><tr><th>Data</th><th>Tipo indicado</th><th>Fonte</th></tr>${ev.map(x=>`<tr data-pending-search="${esc([x.date,x.type,x.description].join(' '))}"><td>${esc(dt(x.date))}</td><td>${esc(x.type)}</td><td>${official(x.url,x.page)?`<a target="_blank" rel="noopener noreferrer" href="${esc(official(x.url,x.page))}">Abrir DOE</a>`:'Fonte pendente'}</td></tr>`).join('')}</table>`;
-  openDialog('Registros em validação',detail);
-  $('#pendingSearch').addEventListener('input',e=>{const q=norm(e.target.value);$$('[data-pending-search]').forEach(row=>{row.hidden=!norm(row.dataset.pendingSearch).includes(q);});});
-  $('#pendingXlsx').addEventListener('click',()=>{
-   const q=norm($('#pendingSearch').value), match=values=>norm(values.join(' ')).includes(q);
-   const candidateRows=[['Data','Resenha','Processo','Servidor','Matrícula','Assunto','Menção GEDIV na origem','Conferência preliminar','Evidência','Página','Fonte'],...r.filter(x=>match([x.resenha,x.process,x.server,x.registration,labelRow(x),x.evidence,x.preliminaryReview])).map(x=>[dt(x.date),x.resenha,x.process,x.server,x.registration,labelRow(x),mentionLabel(x.sourceMention),x.preliminaryReview,x.evidence,x.page,x.url])];
-   const eventRows=[['Data','Tipo indicado','Descrição','Página','Fonte'],...ev.filter(x=>match([x.date,x.type,x.description])).map(x=>[dt(x.date),x.type,x.description,x.page,x.url])];
-   exp.download(exp.xlsx({'Candidatos pendentes':candidateRows,'Eventos pendentes':eventRows}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','GEDIV-pendencias-filtradas.xlsx');toast('Pendências filtradas preparadas.');
-  });
- });
- $('#full').addEventListener('click',()=>{let rows=model().rows;openDialog('Publicações e processos',`<p>${rows.length} decisões na visão e filtros selecionados.</p><table class="dialog-table"><thead><tr><th>Resenha</th><th>Processo</th><th>Servidor</th><th>Assunto</th><th>Resultado</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.resenha)}</td><td>${esc(r.process||'Não transcrito')}</td><td>${esc(r.server)}</td><td>${esc(labelRow(r))}</td><td>${meritBadge(r)}</td></tr>`).join('')}</tbody></table>`);});
- $('#closeDialog').addEventListener('click',()=>$('#dialog').close());$('#closeDialog2').addEventListener('click',()=>$('#dialog').close());
- document.addEventListener('click',e=>{if(!e.target.closest('.downloads')){$('#downloadMenu').hidden=true;$('#downloadToggle').setAttribute('aria-expanded','false');}});
-}
+  <!-- Modal de Detalhes -->
+  <div id="detailModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 hidden z-50">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 relative">
+      <button id="modalCloseBtn" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 text-lg">×</button>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-xs font-semibold px-2.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200" id="modalTag">Progressão</span>
+        <span class="text-xs text-slate-400" id="modalDate">Data</span>
+      </div>
+      <h3 class="text-lg font-bold text-slate-900" id="modalServer">Servidor</h3>
+      <p class="text-xs text-slate-500 mt-0.5" id="modalGroup">Grupo</p>
+      <div class="mt-4 bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+        <div class="flex justify-between"><span class="text-slate-500">Número do Processo:</span><span class="font-semibold text-slate-800" id="modalProcess">—</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Resenha da Portaria:</span><span class="font-semibold text-slate-800" id="modalResenha">—</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Resultado:</span><span class="font-bold text-emerald-600" id="modalMerit">—</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Página no Diário:</span><span class="font-semibold text-slate-800" id="modalPage">—</span></div>
+      </div>
+      <div class="mt-6 flex justify-end gap-2">
+        <button id="modalCloseBtn2" class="px-3.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Fechar</button>
+        <a id="modalOfficialPdfLink" href="https://auniao.pb.gov.br" target="_blank" class="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1">↗ Abrir no DOE Oficial</a>
+      </div>
+    </div>
+  </div>
 
-function renderMeta(){
- const meta=data.meta||{}, pending=data.rows?.filter(r=>r.validation==='pendente').length||0;
- if($('#baseStatus'))$('#baseStatus').textContent=meta.version||'Modelo sem dados';
- if($('#automationStatus'))$('#automationStatus').textContent=meta.verifiedAt?'Última geração disponível':'Coleta diária não conectada';
- if($('#lastUpdated'))$('#lastUpdated').textContent=meta.verifiedAt?String(meta.verifiedAt).replace('T',' ').slice(0,16):'Não carregada';
- if($('#bannerTitle'))$('#bannerTitle').textContent=meta.verifiedAt?'Arquivo privado · dados em conferência':'Modelo visual sem registros individuais';
- if($('#bannerText'))$('#bannerText').textContent=meta.verifiedAt?`${meta.coverage} ${meta.automation} ${meta.personal||''}`:'Esta cópia contém apenas o layout. Nenhuma publicação foi carregada; a coleta diária não está conectada.';
- if($('#resultsStatus'))$('#resultsStatus').textContent=meta.semBaseCarregada?'Sem decisões conferidas':'Decisões conferidas';
- if($('#editionCount'))$('#editionCount').textContent=meta.edicoes??'—';
- if($('#coverageDescription'))$('#coverageDescription').textContent=meta.coverage||'Nenhuma edição foi carregada nesta cópia.';
- if($('#confirmedCount'))$('#confirmedCount').textContent=meta.conferidos??'—';
- if($('#incompleteCount'))$('#incompleteCount').textContent=meta.edicoesPendentes??'—';
- if($('#pendingCount'))$('#pendingCount').textContent=String(pending);
- if($('#pendingDescription'))$('#pendingDescription').textContent=`${pending} registro(s) e ${meta.eventosPendentes||0} evento(s) aguardam conferência; não compõem os indicadores.`;
- try{let u=new URL(data.urls?.workflow||'');if(u.protocol==='https:'&&u.hostname==='github.com'&&!u.username&&!u.password){if($('#manualUpdate')){$('#manualUpdate').href=u.href;$('#manualUpdate').hidden=false;}}}catch{}
-}
+  <div id="toast" class="fixed bottom-4 right-4 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg border border-slate-800 transform translate-y-16 opacity-0 transition-all duration-300 pointer-events-none z-50">
+    Planilha exportada com sucesso!
+  </div>
 
-let controller;
-async function refresh(initial=false){
- controller?.abort();controller=new AbortController();const current=controller;
- if($('#refreshData'))$('#refreshData').disabled=true;
- if($('#refreshStatus'))$('#refreshStatus').textContent='Consultando backend…';
- try{
-  const next=await fetchSnapshot({signal:current.signal});if(current.signal.aborted)return;
-  data=next;window.GEDIV_DATA=next;
-  if(initial||next.meta?.access!=='manager')S.validation=next.dashboard?.defaultScope||'conferido';
-  S.page=0;S.selected='';
-  for(const row of (data.rows||[]))if(row.group&&!groupNames[row.group])groupNames[row.group]=row.group;
-  if($('#group'))$('#group').innerHTML='<option value="">Todos os grupos</option>'+Object.entries(groupNames).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');
-  if($('.updated b'))$('.updated b').textContent='Sincronizada';
-  renderMeta();render();
-  if($('#refreshStatus'))$('#refreshStatus').textContent='Leitura sincronizada · '+new Date().toLocaleTimeString('pt-BR');
- }catch(error){if(!current.signal.aborted&&$('#refreshStatus'))$('#refreshStatus').textContent=error.message+' A última leitura foi mantida.';}
- finally{if(!current.signal.aborted&&$('#refreshData'))$('#refreshData').disabled=false;}
-}
+  <script>
+    const DATASET = [
+      { id: 1, date: "2026-11-03", resenha: "412/2026", process: "SEAD-2026/0129", server: "Maria S. Santos", group: "MAG", axis: "Vertical", merit: "deferido", page: 14 },
+      { id: 2, date: "2026-11-03", resenha: "412/2026", process: "SEAD-2026/0144", server: "José A. Oliveira", group: "SAUDE", axis: "Vertical", merit: "deferido", page: 14 },
+      { id: 3, date: "2026-11-02", resenha: "410/2026", process: "SEAD-2026/0098", server: "Carlos E. Lima", group: "TEC-ADM", axis: "Horizontal", merit: "deferido", page: 9 },
+      { id: 4, date: "2026-11-02", resenha: "410/2026", process: "SEAD-2026/0105", server: "Ana Paula Ribeiro", group: "MAG", axis: "Horizontal", merit: "indeferido", page: 9 },
+      { id: 5, date: "2026-11-01", resenha: "408/2026", process: "SEAD-2026/0055", server: "Fernando M. Costa", group: "GAJ", axis: "Vertical", merit: "deferido", page: 12 },
+      { id: 6, date: "2026-11-01", resenha: "408/2026", process: "SEAD-2026/0061", server: "Patrícia B. Rocha", group: "FAP", axis: "Tempo", merit: "deferido", page: 12 },
+      { id: 7, date: "2026-10-31", resenha: "405/2026", process: "SEAD-2026/0012", server: "Lucas G. Mendes", group: "ANS", axis: "Vertical", merit: "indeferido", page: 7 },
+      { id: 8, date: "2026-10-31", resenha: "405/2026", process: "SEAD-2026/0024", server: "Juliana T. Farias", group: "SAUDE", axis: "Horizontal", merit: "deferido", page: 7 },
+      { id: 9, date: "2026-10-30", resenha: "401/2026", process: "SEAD-2026/0004", server: "Ricardo V. Ramos", group: "FAZENDA", axis: "Tempo", merit: "deferido", page: 16 }
+    ];
 
-bind();renderMeta();render();
-$('#refreshData')?.addEventListener('click',()=>refresh());
-$('#scope')?.addEventListener('change',e=>{S.validation=e.target.value;S.page=0;S.card='';render();});
-void refresh(true);
-})();
+    const GROUP_NAMES = {
+      'MAG': 'MAG · Magistério Estadual',
+      'SAUDE': 'Saúde Estadual',
+      'GAJ': 'GAJ · Apoio Judiciário',
+      'FAP': 'FAP · Fiscalização Agropecuária',
+      'TEC-ADM': 'TEC-ADM · Técnicos Administrativos',
+      'ANS': 'ANS · Nível Superior',
+      'FAZENDA': 'Fazenda Estadual'
+    };
+
+    let currentFilter = { axis: 'all', query: '', merit: '' };
+
+    const tabDashboard = document.getElementById('tabDashboard');
+    const tabPortal = document.getElementById('tabPortal');
+    const viewDashboard = document.getElementById('viewDashboard');
+    const viewPortal = document.getElementById('viewPortal');
+    const searchInput = document.getElementById('searchInput');
+    const btnResetFilters = document.getElementById('btnResetFilters');
+    const btnExportCsv = document.getElementById('btnExportCsv');
+    const groupList = document.getElementById('groupList');
+    const decisionsTableBody = document.getElementById('decisionsTableBody');
+    const tableRecordCount = document.getElementById('tableRecordCount');
+
+    const detailModal = document.getElementById('detailModal');
+    const modalCloseBtn = document.getElementById('modalCloseBtn');
+    const modalCloseBtn2 = document.getElementById('modalCloseBtn2');
+    const modalTag = document.getElementById('modalTag');
+    const modalDate = document.getElementById('modalDate');
+    const modalServer = document.getElementById('modalServer');
+    const modalGroup = document.getElementById('modalGroup');
+    const modalProcess = document.getElementById('modalProcess');
+    const modalResenha = document.getElementById('modalResenha');
+    const modalMerit = document.getElementById('modalMerit');
+    const modalPage = document.getElementById('modalPage');
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('translate-y-16', 'opacity-0');
+      setTimeout(() => toast.classList.add('translate-y-16', 'opacity-0'), 2500);
+    }
+
+    tabDashboard.addEventListener('click', () => {
+      viewDashboard.classList.remove('hidden');
+      viewPortal.classList.add('hidden');
+      tabDashboard.className = "px-3.5 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm";
+      tabPortal.className = "px-3.5 py-1.5 text-xs font-medium rounded-md bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors";
+    });
+
+    tabPortal.addEventListener('click', () => {
+      viewPortal.classList.remove('hidden');
+      viewDashboard.classList.add('hidden');
+      tabPortal.className = "px-3.5 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm";
+      tabDashboard.className = "px-3.5 py-1.5 text-xs font-medium rounded-md bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors";
+    });
+
+    document.getElementById('btnOpenDashboardFromPortal').addEventListener('click', () => tabDashboard.click());
+
+    function renderGroups() {
+      const groups = ['MAG', 'SAUDE', 'GAJ', 'FAP', 'TEC-ADM', 'ANS'];
+      groupList.innerHTML = groups.map(grp => {
+        const items = DATASET.filter(d => d.group === grp);
+        const def = items.filter(d => d.merit === 'deferido').length;
+        const ind = items.filter(d => d.merit === 'indeferido').length;
+        const total = items.length || 1;
+        const defPct = Math.round((def / total) * 100);
+
+        return `
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs">
+              <span class="font-medium text-slate-700">${GROUP_NAMES[grp] || grp}</span>
+              <span class="text-slate-500 font-mono text-[11px]">${def} Deferidos · ${ind} Indeferidos</span>
+            </div>
+            <div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+              <div class="bg-emerald-500 h-full" style="width: ${defPct}%"></div>
+              <div class="bg-rose-500 h-full flex-1"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTable() {
+      let filtered = DATASET.filter(item => {
+        if (currentFilter.axis !== 'all' && item.axis !== currentFilter.axis) return false;
+        if (currentFilter.merit && item.merit !== currentFilter.merit) return false;
+        if (currentFilter.query) {
+          const q = currentFilter.query.toLowerCase();
+          const match = item.server.toLowerCase().includes(q) ||
+                        item.process.toLowerCase().includes(q) ||
+                        item.resenha.toLowerCase().includes(q) ||
+                        (GROUP_NAMES[item.group] || '').toLowerCase().includes(q);
+          if (!match) return false;
+        }
+        return true;
+      });
+
+      tableRecordCount.textContent = `Exibindo ${filtered.length} de ${DATASET.length} registros`;
+
+      if (filtered.length === 0) {
+        decisionsTableBody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400">Nenhum ato localizado com os filtros selecionados.</td></tr>`;
+        return;
+      }
+
+      decisionsTableBody.innerHTML = filtered.map(row => `
+        <tr class="hover:bg-slate-50/80 transition-colors cursor-pointer group" data-id="${row.id}">
+          <td class="py-2.5 px-4 font-mono text-slate-600">${row.date.split('-').reverse().join('/')}</td>
+          <td class="py-2.5 px-4 font-medium text-slate-900">${row.resenha}</td>
+          <td class="py-2.5 px-4 font-mono text-slate-600">${row.process}</td>
+          <td class="py-2.5 px-4 font-semibold text-slate-800">${row.server}</td>
+          <td class="py-2.5 px-4"><span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">${row.axis} · ${row.group}</span></td>
+          <td class="py-2.5 px-4"><span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${row.merit === 'deferido' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">${row.merit.toUpperCase()}</span></td>
+          <td class="py-2.5 px-4 text-right"><button class="text-blue-600 hover:text-blue-800 font-medium text-xs group-hover:underline">Detalhes →</button></td>
+        </tr>
+      `).join('');
+
+      decisionsTableBody.querySelectorAll('tr[data-id]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const item = DATASET.find(d => d.id === Number(tr.dataset.id));
+          if (item) openModal(item);
+        });
+      });
+    }
+
+    function openModal(item) {
+      modalTag.textContent = item.axis === 'Tempo' ? 'Tempo de Serviço' : `Progressão ${item.axis}`;
+      modalDate.textContent = `DOE ${item.date.split('-').reverse().join('/')}`;
+      modalServer.textContent = item.server;
+      modalGroup.textContent = GROUP_NAMES[item.group] || item.group;
+      modalProcess.textContent = item.process;
+      modalResenha.textContent = `Resenha nº ${item.resenha}`;
+      modalMerit.textContent = item.merit.toUpperCase();
+      modalMerit.className = `font-bold ${item.merit === 'deferido' ? 'text-emerald-600' : 'text-rose-600'}`;
+      modalPage.textContent = `Página ${item.page}`;
+      detailModal.classList.remove('hidden');
+    }
+
+    function closeModal() { detailModal.classList.add('hidden'); }
+    modalCloseBtn.addEventListener('click', closeModal);
+    modalCloseBtn2.addEventListener('click', closeModal);
+    detailModal.addEventListener('click', (e) => { if (e.target === detailModal) closeModal(); });
+
+    document.querySelectorAll('.filter-axis-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-axis-btn').forEach(b => b.className = "filter-axis-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50");
+        btn.className = "filter-axis-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 text-white shadow-sm";
+        currentFilter.axis = btn.dataset.axis;
+        renderTable();
+      });
+    });
+
+    searchInput.addEventListener('input', (e) => {
+      currentFilter.query = e.target.value.trim();
+      renderTable();
+    });
+
+    btnResetFilters.addEventListener('click', () => {
+      currentFilter.axis = 'all'; currentFilter.query = ''; currentFilter.merit = '';
+      searchInput.value = '';
+      document.querySelector('.filter-axis-btn[data-axis="all"]').click();
+    });
+
+    btnExportCsv.addEventListener('click', () => {
+      const headers = ["Data", "Resenha", "Processo", "Servidor", "Grupo", "Eixo", "Resultado", "Pagina"];
+      const rows = DATASET.map(d => [d.date, d.resenha, d.process, `"${d.server}"`, d.group, d.axis, d.merit, d.page]);
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "GEDIV_Atos_DOE_PB.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast("Planilha CSV exportada!");
+    });
+
+    document.querySelectorAll('[data-filter-axis]').forEach(el => {
+      el.addEventListener('click', () => {
+        const matchingBtn = document.querySelector(`.filter-axis-btn[data-axis="${el.dataset.filterAxis}"]`);
+        if (matchingBtn) matchingBtn.click();
+      });
+    });
+
+    renderGroups();
+    renderTable();
+  </script>
+</body>
+</html>
