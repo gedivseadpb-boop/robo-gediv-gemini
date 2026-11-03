@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+cache/
+output/
+*.pyc
+# O estado contém dados pessoais e só pode ser salvo em repositório PRIVADO.
+# GitHub Actions versiona storage/estado.json no repositório privado.

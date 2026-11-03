@@ -1,0 +1,128 @@
+name: "GEDIV | Coleta oficial e painel privado"
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "Escolha a busca"
+        type: choice
+        options:
+          - historico
+          - atualizar
+        default: atualizar
+        required: true
+      limite:
+        description: "Edições por execução (recomendado 12; histórico até 30)"
+        type: choice
+        options:
+          - "12"
+          - "20"
+          - "30"
+        default: "12"
+        required: true
+  schedule:
+    # Todos os dias às 10:37 de João Pessoa (13:37 UTC); sujeito a atrasos.
+    - cron: "37 13 * * *"
+
+permissions:
+  contents: write
+
+# Não executar dois processos simultaneamente sobre o mesmo estado privado.
+concurrency:
+  group: gediv-coleta-privada
+  cancel-in-progress: false
+
+jobs:
+  coleta:
+    if: ${{ github.event.repository.private == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Baixar código e estado anterior
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Preparar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Instalar OCR em português e dependências
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-por
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar testes básicos do coletor
+        run: python -m unittest discover -s tests -v
+
+      - name: Consultar DOE/PB e gerar painel
+        timeout-minutes: 38
+        env:
+          MODO_INPUT: ${{ inputs.modo }}
+          LIMITE_INPUT: ${{ inputs.limite }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODO="${MODO_INPUT:-atualizar}"
+          LIMITE="${LIMITE_INPUT:-12}"
+          if [[ "$MODO" == "historico" ]]; then
+            ORDEM="historico"
+          else
+            ORDEM="diario"
+          fi
+          echo "Iniciando modo $MODO, até $LIMITE edições neste lote"
+          python src/robo.py \
+            --modo "$ORDEM" \
+            --inicio 2026-01-01 \
+            --fim "$(TZ=America/Fortaleza date +%F)" \
+            --max-edicoes "$LIMITE"
+
+      # Repositório PRIVADO: manter checkpoint sem enviar nomes e matrículas a Pages.
+      # Executa mesmo se o coletor reportar falhas, preservando as edições já lidas.
+      - name: Salvar checkpoint no repositório PRIVADO
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f storage/estado.json ]]; then
+            echo "Ainda não foi criado o checkpoint"; exit 0
+          fi
+          git config user.name "GEDIV Bot"
+          git config user.email "gediv-bot@users.noreply.github.com"
+          git add -f storage/estado.json
+          if git diff --cached --quiet; then
+            echo "Sem alterações de checkpoint"
+          else
+            git commit -m "GEDIV: atualizar checkpoint de coleta [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
+
+      - name: Disponibilizar painel privado atualizado
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: painel-gediv-privado-${{ github.run_number }}
+          path: |
+            output/painel_privado.html
+            output/dados_agregados.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  verificacao_publica:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Instalar dependência para os testes
+        run: pip install 'PyMuPDF>=1.24,<2'
+      - name: Conferir regras com trechos oficiais sem dados pessoais
+        run: python -m unittest discover -s tests -v

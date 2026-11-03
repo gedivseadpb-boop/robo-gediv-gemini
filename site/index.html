@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEDIV | Monitoramento DOE-PB</title>
+<style>
+:root{--navy:#11253d;--blue:#176d93;--teal:#007e83;--line:#e0e7ed;--light:#f4f7fa;--muted:#5f7487;--ink:#17304b;--white:#fff}
+*{box-sizing:border-box}body{margin:0;background:#eef3f7;color:var(--ink);font:14px/1.5 Inter,system-ui,Segoe UI,Arial,sans-serif}
+.top{background:linear-gradient(112deg,#10283e,#125c75);color:white;padding:22px max(22px,calc((100vw - 1500px)/2));display:flex;align-items:center;justify-content:space-between;gap:15px}
+.brand{display:flex;gap:14px;align-items:center}.logo{width:44px;height:44px;border:1px solid #67afb9;border-radius:12px;display:grid;place-items:center;color:#d3faff;font-size:20px;font-weight:800}
+h1{font-size:19px;line-height:1.25;margin:0}small,.hint{color:var(--muted)}.top small{color:#b9dce6}h2{font-size:15px;margin:0 0 13px}
+main{max-width:1500px;margin:auto;padding:22px;display:grid;grid-template-columns:260px 1fr;gap:18px}.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 3px 16px #15384f09}
+.sidebar{align-self:start;position:sticky;top:16px}label{font-size:12px;font-weight:700;color:#456174;display:block;margin:15px 0 5px}
+input,select{width:100%;border:1px solid #cad9e4;border-radius:8px;background:white;padding:10px 11px;color:#17304b;outline:none}
+input:focus,select:focus{border-color:#008b96;box-shadow:0 0 0 3px #008b9619}
+button,.btn{cursor:pointer;border:1px solid #ccdce6;border-radius:9px;padding:9px 13px;background:white;color:#164360;font:inherit;font-weight:650}
+button:hover,.btn:hover{background:#eff7fa}button:focus-visible,.btn:focus-visible{outline:3px solid #f2be59}
+.primary{background:var(--blue);color:white;border-color:var(--blue)}.primary:hover{background:#0b5376}.flex{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}.stack{display:grid;gap:18px}
+.health{display:flex;align-items:center;gap:8px;font-size:12px;color:#4f697e}.dot{width:8px;height:8px;border-radius:50%;background:#e6aa32}
+.hero h2{font-size:23px;margin-bottom:4px}.hero p{margin:0;color:#687c8f}.notice{background:#fff7e5;color:#72501b;border:1px solid #f1ddb6;padding:10px 13px;border-radius:9px;font-size:12px;margin-top:12px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.kpi{padding:17px;border:1px solid #dce6ee;background:white;border-radius:12px;text-align:left;min-height:108px;display:flex;flex-direction:column;justify-content:space-between;gap:4px}
+.kpi:hover{border-color:#3396a4;background:#f7fdfd}.kpi.selected{border:2px solid var(--teal);background:#effbfb;padding:16px}
+.kpi span{color:#607588;font-size:12px}.kpi b{font-size:28px;color:#173850}.kpi em{font-size:11px;font-style:normal;color:#2c8186}
+.toggle{display:flex;background:#eff4f8;padding:4px;border-radius:10px;gap:4px}.toggle button{border:0;background:transparent;border-radius:8px}.toggle button.active{background:#173b59;color:white}
+.chart-line{margin-bottom:10px}.chart-bar{height:11px;border-radius:8px;background:#edf1f5;overflow:hidden}.chart-bar > div{height:100%;border-radius:8px;background:linear-gradient(90deg,#0f7791,#48b4ad)}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.chart-line .flex{margin-bottom:5px}
+.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;min-width:800px}th{text-align:left;text-transform:uppercase;letter-spacing:.035em;font-size:11px;color:#668294;background:#f2f7fa;padding:11px 12px;white-space:nowrap}
+td{border-bottom:1px solid #eaf0f4;padding:11px 12px;vertical-align:middle}tbody tr:hover{background:#f8fbfc}
+.badge{border-radius:100px;font-size:11px;font-weight:750;padding:4px 9px;background:#e8eef6;color:#35536b;white-space:nowrap}
+.badge.good{background:#e0f3eb;color:#16714f}.badge.bad{background:#fbe9e7;color:#a13b34}.badge.warn{background:#fff1d8;color:#9b6b20}
+.resenha{border:1px solid #e0e8ee;border-radius:10px;margin-top:9px;overflow:hidden}
+.resenha-head{padding:13px 14px;display:flex;justify-content:space-between;gap:12px;align-items:center;cursor:pointer;background:#fafcfd}
+.resenha-head:hover{background:#f1f8fa}.resenha-head strong{font-size:15px}
+.resenha-head small{display:block}.resenha-body{padding:0 12px 12px}.entry{display:grid;gap:6px;grid-template-columns:1fr auto}
+.empty{text-align:center;padding:30px 10px;color:#627789}.link{color:#096a8a;text-decoration:underline;text-underline-offset:2px}
+#modal{position:fixed;inset:0;z-index:5;background:#0e2c42d9;display:none;align-items:center;justify-content:center;padding:22px}
+#modal.open{display:flex}.modal-card{background:white;border-radius:15px;max-width:1400px;width:100%;max-height:94vh;overflow:auto;padding:20px}
+.pill{font-size:11px;border:1px solid #cfe1e8;border-radius:30px;padding:5px 9px;color:#386a80}
+footer{padding:22px;text-align:center;color:#7690a0;font-size:12px}
+@media(max-width:1050px){main{grid-template-columns:1fr}.sidebar{position:static}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.top{padding:16px}.hero h2{font-size:19px}main{padding:12px}.panel{padding:13px}.chart-grid{grid-template-columns:1fr}.kpi b{font-size:23px}}
+</style></head><body>
+<header class="top"><div class="brand"><div class="logo">PB</div><div><h1>GEDIV | Diário Oficial da Paraíba</h1><small>Painel de publicações · Progressão e Tempo de Serviço</small></div></div><div class="health"><span class="dot"></span><div><b id="update">—</b><br><small>Última geração do painel</small></div></div></header>
+<main>
+<aside class="panel sidebar"><h2>Filtros de consulta</h2>
+<label for="period">Período</label><input id="period" type="month">
+<label for="axis">Eixo</label><select id="axis"><option value="">Todos os eixos</option><option>Progressão</option><option>Tempo de Serviço</option></select>
+<label for="mod">Modalidade / subcategoria</label><select id="mod"><option value="">Todas</option></select>
+<label for="group">Grupo funcional</label><select id="group"><option value="">Todos os grupos</option></select>
+<label for="result">Resultado</label><select id="result"><option value="">Todos</option><option>Deferido</option><option>Indeferido</option><option>Não informado</option></select>
+<label for="search">Buscar processo, servidor ou resenha</label><input id="search" placeholder="Digite para pesquisar" autocomplete="off">
+<div class="flex" style="margin-top:17px"><button id="clear">Limpar filtros</button><button class="primary" id="export">Exportar CSV</button></div>
+<div style="margin-top:14px">
+  <a class="btn primary" id="manual-update" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;text-decoration:none">↻ Atualizar Diário Oficial</a>
+  <small>Abre o GitHub Actions. Após executar, baixe o novo painel privado. Este HTML não atualiza sozinho.</small>
+</div>
+<div class="notice" id="privacy-note">Dados individuais restritos à versão privada do painel. A versão pública exibe somente metadados sem identificação pessoal.</div>
+<div class="health" style="margin-top:14px">Fonte: <a class="link" target="_blank" rel="noopener" href="https://auniao.pb.gov.br/servicos/doe">A União — DOE/PB</a></div>
+</aside>
+<section class="stack">
+<div class="panel hero"><div class="flex"><div><h2>Visão geral das publicações</h2><p>Indicadores atualizados conforme os filtros e os documentos efetivamente processados.</p></div><span class="pill" id="mode">—</span></div><div class="notice" id="coverage"></div></div>
+<div class="kpis" id="kpis"></div>
+<div class="panel"><h2>Distribuição das decisões</h2><div class="chart-grid"><div><b>Por eixo</b><div id="axis-bars"></div></div><div><b>Por modalidade ou subcategoria</b><div id="sub-bars"></div></div></div></div>
+<div class="panel">
+<div class="flex" style="margin-bottom:14px"><div><h2 style="margin:0">Publicações e processos</h2><small id="count"></small></div><div class="flex"><div class="toggle"><button id="res-btn" class="active">Por resenha</button><button id="proc-btn">Por processo</button></div><button id="full">⛶ Ampliar</button></div></div>
+<div id="results"></div>
+</div>
+</section></main><footer>GEDIV • Painel informativo com rastreabilidade documental. Resultados de OCR exigem conferência humana.</footer>
+<div id="modal"><div class="modal-card"><div class="flex"><b>Visualização ampliada — processos</b><button id="close">✕ Fechar</button></div><div style="margin-top:14px" id="modal-content"></div></div></div>
+<script id="gediv-data" type="application/json">__GEDIV_EMBED_DATA__</script>
+<script>
+"use strict";
+const DATA=JSON.parse(document.getElementById("gediv-data").textContent);
+const actionLink = DATA.workflow_url || "";
+const updateAnchor = document.getElementById("manual-update");
+if(actionLink && actionLink.startsWith("https://github.com/")) {
+  updateAnchor.href=actionLink;
+} else {
+  updateAnchor.removeAttribute("href");
+  updateAnchor.style.opacity=".55";
+  updateAnchor.title="Disponível após executar no GitHub";
+  updateAnchor.addEventListener("click",e=>{e.preventDefault();alert("O botão será ativado após publicar o projeto em um repositório privado e executar pelo GitHub Actions.");});
+}
+const ALL=DATA.registros||[], EVENTS=DATA.eventos||[];
+const TS=["Anotação de Tempo","Desaverbação","Licença para Interesses Particulares","Desistência de Licença","Licença Especial","Conversão de Licença Especial","Conversão de Férias"];
+const isPrivate=DATA.mode==="privado";
+const $=id=>document.getElementById(id);
+let view="resenha",card="",selectedRes="",displayed=[];
+const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const unique=xs=>[...new Set(xs.filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+const badge=v=>'<span class="badge '+(v==="Deferido"?"good":v==="Indeferido"?"bad":v.includes("pendente")?"warn":"")+'">'+esc(v||"—")+'</span>';
+const cardTypes=[["processos","Processos distintos"],["resenhas","Resenhas"],["decisoes","Decisões individuais"],["deferidos","Deferidos"],["indeferidos","Indeferidos"],["refeitos","Refeitos"],["sem_efeito","Tornados sem efeito"]];
+function updateOptions(el,vals,first){let old=el.value;el.innerHTML='<option value="">'+esc(first)+'</option>'+vals.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");el.value=vals.includes(old)?old:"";}
+function filtered(){
+ let rows=ALL.filter(r=>(!$("period").value||r.data.startsWith($("period").value))&&(!$("axis").value||r.eixo===$("axis").value));
+ updateOptions($("mod"),$("axis").value==="Tempo de Serviço"?TS:unique(rows.map(r=>r.eixo==="Progressão"?r.modalidade:r.subcategoria)),"Todas");
+ rows=rows.filter(r=>!$("mod").value||(r.eixo==="Progressão"?r.modalidade:r.subcategoria)===$("mod").value);
+ $("group").disabled=$("axis").value==="Tempo de Serviço";
+ updateOptions($("group"),unique(rows.filter(r=>r.eixo==="Progressão").map(r=>r.grupo)),"Todos os grupos");
+ rows=rows.filter(r=>!$("group").value||r.grupo===$("group").value);
+ let q=$("search").value.toLocaleLowerCase("pt-BR");
+ return rows.filter(r=>(!$("result").value||r.resultado===$("result").value)&&(!q||[r.servidor,r.processo,r.resenha,r.grupo,r.subcategoria].join(" ").toLocaleLowerCase("pt-BR").includes(q)));
+}
+function metrics(rows){
+ return {
+ processos:new Set(rows.map(r=>(isPrivate?r.processo:r.processo_key)||"")).size-(rows.some(r=>!(isPrivate?r.processo:r.processo_key))?1:0),
+ resenhas:new Set(rows.filter(r=>r.resenha).map(r=>r.fonte+"|"+r.resenha)).size,
+ decisoes:rows.length,
+ deferidos:rows.filter(r=>r.resultado==="Deferido").length,
+ indeferidos:rows.filter(r=>r.resultado==="Indeferido").length,
+ // Não contabilizar refação sem vínculo validado ao ato anterior.
+ refeitos:rows.filter(r=>r.alteracao==="Refeito (validado)").length,
+ sem_efeito:rows.filter(r=>r.alteracao==="Sem efeito (validado)").length
+ };
+}
+function csv(records){
+ const cols=isPrivate?["data","resenha","processo","servidor","matricula","eixo","modalidade","grupo","subcategoria","resultado","alteracao","pagina","fonte","validacao"]:["data","resenha","eixo","modalidade","grupo","subcategoria","resultado","alteracao","validacao"];
+ const v=x=>{let s=String(x??"");if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
+ const text="\ufeff"+cols.join(";")+"\n"+records.map(r=>cols.map(c=>v(r[c])).join(";")).join("\n");
+ const blob=new Blob([text],{type:"text/csv;charset=utf-8"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="GEDIV_registros_filtrados.csv";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),250);
+}
+function bars(id,rows,field){
+ const counts={};rows.forEach(r=>{const k=field(r)||"Não classificado";counts[k]=(counts[k]||0)+1});
+ let top=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,9),max=Math.max(...top.map(v=>v[1]),1);
+ $(id).innerHTML=top.map(([k,n])=>`<div class="chart-line"><div class="flex"><small>${esc(k)}</small><b>${n}</b></div><div class="chart-bar"><div style="width:${100*n/max}%"></div></div></div>`).join("")||'<div class="empty">Sem dados neste filtro</div>';
+}
+function rowsTable(rows){
+ if(!rows.length)return '<div class="empty">Nenhum registro identificado; a cobertura e a revisão podem estar pendentes.</div>';
+ const head=isPrivate?'<th>Servidor</th><th>Matrícula</th><th>Processo</th>':'';
+ return `<div class="table-scroll"><table><thead><tr><th>Publicação</th><th>Resenha</th>${head}<th>Eixo</th><th>Modalidade / subcategoria</th><th>Grupo</th><th>Resultado</th><th>Origem</th></tr></thead><tbody>`+
+ rows.map(r=>`<tr><td>${esc(r.data)}</td><td>${esc(r.resenha)}</td>${isPrivate?`<td>${esc(r.servidor||"Pendente")}</td><td>${esc(r.matricula||"—")}</td><td>${esc(r.processo||"—")}</td>`:""}<td>${esc(r.eixo)}</td><td>${esc(r.modalidade||r.subcategoria||"—")}</td><td>${esc(r.grupo||"—")}</td><td>${badge(r.resultado)}</td><td>${isPrivate&&r.fonte?.startsWith("https://")?`<a class="link" target="_blank" rel="noopener noreferrer" href="${esc(r.fonte)}#page=${Number(r.pagina)||1}">PDF p.${Number(r.pagina)||1}</a>`:"—"}</td></tr>`).join("")+"</tbody></table></div>";
+}
+function resList(rows){
+ if(!rows.length)return '<div class="empty">Nenhuma resenha identificada; a cobertura e a revisão podem estar pendentes.</div>';
+ let groups=new Map();
+ rows.forEach(r=>{let k=r.data+"|"+r.resenha;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r)});
+ return [...groups.entries()].map(([k,items],i)=>{
+ let key="r"+i,opened=selectedRes===k;
+ return `<div class="resenha"><div class="resenha-head" data-key="${esc(k)}" role="button" tabindex="0"><div><strong>${opened?"⌄":"›"} Resenha ${esc(items[0].resenha)}</strong><small>${esc(items[0].data)} · ${items.length} decisão(ões) · ${esc(items[0].eixo)}</small></div><div class="flex">${badge(items[0].resultado)}<span class="pill">${esc(items[0].modalidade||items[0].subcategoria||"Ato")}</span></div></div>${opened?'<div class="resenha-body"><div class="flex" style="margin:8px"><b>Processos da resenha</b><button class="expand" data-key="'+esc(k)+'">⛶ Tela cheia</button></div>'+rowsTable(items)+'</div>':""}</div>`;
+ }).join("");
+}
+function render(){
+ displayed=filtered();let rows=displayed;
+ if(card==="deferidos")rows=rows.filter(r=>r.resultado==="Deferido");
+ if(card==="indeferidos")rows=rows.filter(r=>r.resultado==="Indeferido");
+ if(card==="refeitos")rows=rows.filter(r=>r.alteracao==="Refeito (validado)");
+ if(card==="sem_efeito")rows=rows.filter(r=>r.alteracao==="Sem efeito (validado)");
+ let m=metrics(displayed);
+ $("kpis").innerHTML=cardTypes.map(([key,label])=>`<button class="kpi ${card===key?"selected":""}" data-card="${key}"><span>${label}</span><b>${m[key]}</b><em>${card===key?"Filtro ativo · clique para remover":"Clique para explorar"}</em></button>`).join("");
+ bars("axis-bars",displayed,r=>r.eixo);
+ bars("sub-bars",displayed,r=>r.modalidade||r.subcategoria);
+ $("count").textContent=`${rows.length} decisão(ões) na visualização selecionada`;
+ $("results").innerHTML=view==="resenha"?resList(rows):rowsTable(rows);
+ $("res-btn").classList.toggle("active",view==="resenha");$("proc-btn").classList.toggle("active",view==="processo");
+}
+["period","axis","mod","group","result","search"].forEach(id=>$(id).addEventListener(id==="search"?"input":"change",()=>{selectedRes="";render()}));
+$("kpis").addEventListener("click",e=>{let p=e.target.closest("[data-card]");if(!p)return;card=card===p.dataset.card?"":p.dataset.card;render()});
+$("res-btn").onclick=()=>{view="resenha";render()};$("proc-btn").onclick=()=>{view="processo";render()};
+$("results").addEventListener("click",e=>{let head=e.target.closest(".resenha-head"),full=e.target.closest(".expand");if(full){selectedRes=full.dataset.key;openModal();return}if(head){selectedRes=selectedRes===head.dataset.key?"":head.dataset.key;render()}});
+$("results").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.matches(".resenha-head")){e.target.click()}});
+$("clear").onclick=()=>{["period","axis","mod","group","result","search"].forEach(id=>$(id).value="");card="";selectedRes="";render()};
+$("export").onclick=()=>csv(displayed);
+function openModal(){let rows=displayed;if(selectedRes)rows=rows.filter(r=>r.data+"|"+r.resenha===selectedRes);$("modal-content").innerHTML=rowsTable(rows);$("modal").classList.add("open")}
+$("full").onclick=openModal;$("close").onclick=()=>{$("modal").classList.remove("open")};
+$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("close").click()});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")$("close").click()});
+$("update").textContent=DATA.atualizado_em?DATA.atualizado_em.replace("T"," ").slice(0,16):"Sem coleta";
+$("mode").textContent=isPrivate?"VISÃO PRIVADA • arquivo local":"VISÃO PÚBLICA • dados limitados";
+const cob = DATA.cobertura || {};
+const rest = (typeof cob.edicoes_pendentes_intervalo === "number")
+  ? ` · ${cob.edicoes_pendentes_intervalo} edição(ões) ainda pendente(s) no período ${esc(cob.inicio||"")} a ${esc(cob.fim||"")}`
+  : "";
+$("coverage").innerHTML=`Cobertura: ${DATA.edicoes?.length||0} edição(ões) registradas; ${(DATA.edicoes||[]).filter(e=>e.status==="ERRO").length} falha(s) de coleta${rest}. <strong>Indicadores provisórios: registros pendentes de revisão humana.</strong>`;
+$("privacy-note").textContent=isPrivate?"ATENÇÃO: este arquivo contém nomes, matrículas e processos. Guarde em local de acesso restrito; não publique este HTML no GitHub Pages.":"Versão pública: nomes, matrículas e processos não são disponibilizados. Para consultar detalhes, use o arquivo privado recebido da execução.";
+render();
+</script></body></html>
