@@ -2,10 +2,10 @@
 """Coletor conservador GEDIV: DOE-PB -> PDF -> registros auditáveis -> HTML.
 Requer internet APENAS durante collect. PDFs locais funcionam sem rede.
 """
-import argparse, hashlib, json, os, re, sys, time, unicodedata
+import argparse, copy, hashlib, json, os, re, sys, time, unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from zoneinfo import ZoneInfo
 import fitz
 try:
@@ -55,16 +55,61 @@ def compact(s):
     return re.sub(r"\s+"," ",s or "").strip()
 def now():
     return datetime.now(ZoneInfo("America/Fortaleza")).isoformat(timespec="seconds")
+
+def official_url(url):
+    """Só aceita o acervo HTTPS oficial, sem credenciais nem domínios parecidos."""
+    try:
+        parsed=urlsplit(url)
+        return (parsed.scheme.lower()=="https" and
+                parsed.hostname in {"auniao.pb.gov.br", "www.auniao.pb.gov.br"} and
+                parsed.username is None and parsed.password is None and
+                parsed.port in (None,443))
+    except ValueError:
+        return False
+
+def completed(meta):
+    """Parcial ou com pendências nunca equivale a processamento completo."""
+    return bool(meta) and meta.get("status")=="PROCESSADO" and not meta.get("pendencias")
+
+def reviewed(row):
+    return norm(row.get("validacao", "")).strip() in {"VALIDADO","VALIDADA","CONFERIDO","CONFERIDA"}
+
+def rejected(row):
+    return norm(row.get("validacao", "")).strip() in {"REJEITADO","REJEITADA","EXCLUIDO","EXCLUIDA"}
+
+def write_private(path,content):
+    """Cria o arquivo já restrito, sem janela inicial de leitura pública."""
+    flags=os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,"O_NOFOLLOW",0)
+    fd=os.open(path,flags,0o600)
+    with os.fdopen(fd,"w",encoding="utf-8") as stream:
+        if hasattr(os,"fchmod"): os.fchmod(stream.fileno(),0o600)
+        stream.write(content)
+
 def fetch(url,session,max_bytes=25_000_000):
+    if not official_url(url):
+        raise ValueError("URL fora do domínio oficial do DOE")
     for attempt in range(3):
         try:
-            r=session.get(url,timeout=(15,60),headers={"User-Agent":"GEDIV-Monitor/1.0 (consulta pública; contato pelo repositório)"},stream=True)
-            r.raise_for_status()
-            data=b""
-            for part in r.iter_content(65536):
-                data+=part
-                if len(data)>max_bytes: raise ValueError("Arquivo grande demais: "+url)
-            return data
+            current=url
+            for _ in range(6):
+                r=session.get(current,timeout=(15,60),headers={"User-Agent":"GEDIV-Monitor/1.0 (consulta pública; contato pelo repositório)"},stream=True,allow_redirects=False)
+                try:
+                    if r.status_code in (301,302,303,307,308):
+                        location=r.headers.get("Location")
+                        target=urljoin(current,location or "")
+                        if not location or not official_url(target):
+                            raise ValueError("Redirecionamento fora da fonte oficial")
+                        current=target
+                        continue
+                    r.raise_for_status()
+                    data=bytearray()
+                    for part in r.iter_content(65536):
+                        data.extend(part)
+                        if len(data)>max_bytes: raise ValueError("Arquivo excede o tamanho permitido")
+                    return bytes(data)
+                finally:
+                    r.close()
+            raise ValueError("Limite de redirecionamentos excedido")
         except (requests.RequestException,ValueError):
             if attempt==2: raise
             time.sleep(2*(attempt+1))
@@ -91,7 +136,7 @@ def discover(start,end,session):
                 if "/view" in href: href=href.split("/view")[0]
                 href=href.split("?")[0]
                 if not href.lower().endswith(".pdf"): continue
-                if not href.startswith(BASE_URL): continue
+                if not official_url(href): continue
                 urls[href]=dt.isoformat()
             if not found or not any("b_start" in a["href"] for a in anchors): break
         cursor=date(cursor.year+(cursor.month==12),cursor.month%12+1,1)
@@ -112,29 +157,25 @@ def ocr_pix(page,clip=None,scale=3.4,psm=6):
     return pytesseract.image_to_string(image,lang="por",config=f"--psm {psm}")
 
 def page_sections(page):
-    """Retorna trechos por coluna; OCR reforçado se não houver texto utilizável."""
+    """Avalia cada coluna: texto legível em uma não encobre a outra."""
     r=page.rect
-    original=page.get_text("text",sort=True)
-    if text_quality(original):
-        # Separação de colunas evita mistura de resenhas de unidades diferentes.
-        mid=(r.x0+r.x1)/2
-        cols=[fitz.Rect(r.x0,r.y0,mid+8,r.y1),fitz.Rect(mid-8,r.y0,r.x1,r.y1)]
-        return [(page.get_text("text",clip=col,sort=True),False) for col in cols]
-    # PDF com fonte cifrada ou digitalizado: OCR com duas colunas
     mid=(r.x0+r.x1)/2
     cols=[fitz.Rect(r.x0,r.y0,mid+8,r.y1),fitz.Rect(mid-8,r.y0,r.x1,r.y1)]
-    return [(ocr_pix(page,clip=col,scale=2.5,psm=6),True) for col in cols] + [(ocr_pix(page,scale=3,psm=6),True)]
-
-def extract_rows_from_image(page):
-    """Segunda passagem em faixas: necessária em tabelas com fonte pequena."""
-    text=[]
-    r=page.rect
-    # Faixas com sobreposição preservam linhas horizontais.
-    for y in range(0,int(r.height),70):
-        rect=fitz.Rect(r.x0+20,r.y0+y,r.x1-20,min(r.y1,r.y0+y+112))
-        line=ocr_pix(page,clip=rect,scale=5,psm=6)
-        if PAT_PROC.search(norm(line)): text.append(line)
-    return "\n".join(text)
+    sections=[]
+    for index,col in enumerate(cols,1):
+        raw=page.get_text("text",clip=col,sort=True)
+        if text_quality(raw):
+            sections.append((raw,False))
+            continue
+        # Coluna vazia em PDF nativo pode estar em branco. Imagens e texto
+        # cifrado exigem OCR; em falha, conservar as outras regiões e alertar.
+        if not raw.strip() and not page.get_images():
+            sections.append(("",False)); continue
+        try:
+            sections.append((ocr_pix(page,clip=col,scale=2.5,psm=6),True))
+        except Exception as exc:
+            sections.append((f"[FALHA_OCR_COLUNA_{index}: {type(exc).__name__}]\n"+raw,True))
+    return sections
 
 def hierarchy(text):
     t=norm(text)
@@ -169,6 +210,33 @@ def alteration(text):
     if re.search(r"REPUBLICA|REPUBLICAD|RETIFIC|CORRIG|ONDE\s+SE\s+LE",t): return "Refeito (vínculo pendente)"
     return "Original"
 
+def gediv_blocks(text):
+    """Isola cada cabeçalho GEDIV sem atravessar outra unidade na mesma coluna."""
+    heads=list(PAT_GEDIV.finditer(text))
+    starts=[]
+    for i,head in enumerate(heads):
+        start=head.start()
+        # Algumas edições imprimem o número antes da identificação da unidade.
+        # Não transportar a resenha anterior após processo ou decisão já vistos.
+        previous_end=heads[i-1].end() if i else max(0,start-700)
+        previous=list(PAT_RES.finditer(text[previous_end:start]))
+        if previous:
+            res=previous[-1]
+            absolute=previous_end+res.start()
+            between=text[previous_end+res.end():start]
+            if (start-absolute<700 and not PAT_PROC.search(between) and
+                    not PAT_OTHER_GERENCIA.search(between) and
+                    not re.search(r"\b(?:IN)?DEFERI(?:U|R|DO|DOS|DA|DAS|MOS)\b",between)):
+                start=absolute
+        starts.append(start)
+    for i,head in enumerate(heads):
+        start=starts[i]
+        end=starts[i+1] if i+1<len(heads) else len(text)
+        boundary=re.search(r"(?m)^[ \t]*(?:SECRETARIA[ \t]+DE[ \t]+ESTADO\b|GERENCIA[ \t]+EXECUTIVA\b)",
+                           text[head.end():end])
+        if boundary: end=head.end()+boundary.start()
+        yield text[start:end]
+
 def parse_rows(text,dt,url,page_no,resenha,eixo,modalidade,grupo,subcat,resultado,alteracao,origin,ocr):
     matches=list(PAT_PROC.finditer(text))
     rows=[]
@@ -180,12 +248,14 @@ def parse_rows(text,dt,url,page_no,resenha,eixo,modalidade,grupo,subcat,resultad
         matricula=reg.group() if reg else ""
         name=""
         if reg:
-            rest=flat[reg.end():]
+            rest=flat[reg.end():].strip()
             # Nome geralmente precede o cargo, mas não inventar se não identificável.
             job=re.search(r"\b"+JOBS+r"\b",rest,re.I)
             if job: name=compact(rest[:job.start()]).strip(" |-")
             else:
-                # corta em cifras/títulos/fim de linha, e deixa pendente
+                # Tabelas de tempo não têm cargo. Parecer e colunas numéricas
+                # delimitam o nome; conservar a transcrição como candidato.
+                rest=re.split(r"\s+(?:(?:PBPREV|PARECER)\b|\d)",rest,maxsplit=1)[0]
                 nm=re.match(r"([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ .'-]{5,75})",rest)
                 if nm: name=nm.group(1).strip()
         if len(name)>90: name=""
@@ -193,72 +263,82 @@ def parse_rows(text,dt,url,page_no,resenha,eixo,modalidade,grupo,subcat,resultad
         row_result=merit(span)
         has_result=bool(re.search(r"\b(?:IN)?DEFERI(?:U|R|DO|DOS|DA|DAS|MOS)\b",norm(span)))
         effective=row_result if has_result else resultado
-        unique=hashlib.sha256(f"{url}|{page_no}|{resenha}|{proc}|{effective}".encode()).hexdigest()[:20]
+        unique=hashlib.sha256(f"{url}|{page_no}|{resenha}|{proc}|{matricula}|{name}|{effective}|{eixo}|{modalidade}|{subcat}".encode()).hexdigest()[:20]
         rows.append({"id":unique,"data":dt,"resenha":resenha or "",
           "processo":proc,"servidor":name,"matricula":matricula,
           "eixo":eixo,"modalidade":modalidade,"grupo":grupo,"subcategoria":subcat,
           "resultado":effective,"alteracao":alteracao,"pagina":page_no,
           "fonte":url,"extracao":"OCR" if ocr else "Texto",
-          "validacao":"PENDENTE — conferir PDF","trecho":compact(text[max(0,m.start()-70):m.end()+220])[:320]})
+          "validacao":"PENDENTE — conferir PDF","pagina_confirmada_origem":True,
+          "mencao_gediv_origem":"expresso" if origin!="continuidade" else "continuidade_a_conferir",
+          "trecho":compact(text[max(0,m.start()-70):m.end()+220])[:320]})
     return rows
 
 def pdf_to_records(pdf,dt,url):
     rows=[]; events=[]; issues=[]; page_count=0; resenhas=set()
+    continuation=None
     with fitz.open(pdf) as document:
         page_count=len(document)
         for pno,page in enumerate(document,1):
             try:
                 sections=page_sections(page)
-                # Também avalia o texto completo: cabeçalhos podem atravessar as duas colunas
-                complete="\n".join(t for t,_ in sections)
+                if any(ocr for _,ocr in sections):
+                    issues.append(f"p.{pno}: OCR requer conferência da página e das colunas.")
                 for raw,ocr in sections:
                     text=norm(raw)
-                    # Cabeçalho da GEDIV na própria coluna ou no topo da página
-                    head=bool(PAT_GEDIV.search(text))
-                    if not head: continue
-                    # Conservar contexto GEDIV apenas até um cabeçalho de outra unidade.
-                    idx=PAT_GEDIV.search(text).start()
-                    prior=[m for m in PAT_RES.finditer(text[:idx]) if idx-m.end()<700]
-                    candidate=text[prior[-1].start() if prior else idx:]
-                    next_heading=re.search(r"\n\s*(?:SECRETARIA\s+DE\s+ESTADO|GERENCIA\s+EXECUTIVA\s+(?!DE\s+CONC|DE\s+DIREITOS|DE\s+CONCESSAO))",candidate[65:])
-                    if next_heading: candidate=candidate[:65+next_heading.start()]
-                    # Se o cabeçalho estiver fora do OCR de coluna, tente introdução da página inteira.
-                    rm=list(PAT_RES.finditer(candidate))
-                    if not rm:
-                        issues.append(f"p.{pno}: GEDIV identificada sem resenha numerada; revisar ato individual.")
-                    acts=[]
-                    if rm:
-                        for j,m in enumerate(rm):
-                            end=rm[j+1].start() if j+1<len(rm) else len(candidate)
-                            acts.append((m.group(1),candidate[m.start():end]))
-                    else: acts=[("",candidate)]
-                    for rid,act in acts:
-                        eixo,mod,grupo,sub=hierarchy(act)
-                        alt=alteration(act)
-                        if alt!="Original":
-                            event_id=hashlib.sha256(f"{url}|{pno}|{rid}|{alt}|{act}".encode()).hexdigest()[:20]
-                            events.append({"id":event_id,"data":dt,"fonte":url,"pagina":pno,
-                                "resenha_modificadora":rid,"tipo":alt,"validacao":"PENDENTE_VINCULACAO",
-                                "trecho":compact(act)[:1000]})
-                            continue
-                        first_proc=PAT_PROC.search(act)
-                        result=merit(act[:first_proc.start()] if first_proc else act)
-                        if eixo=="Outras publicações GEDIV":
-                            issues.append(f"p.{pno} resenha {rid or '?'}: tema fora dos dois eixos; revisar.")
-                            continue
-                        recs=parse_rows(act,dt,url,pno,rid,eixo,mod,grupo,sub,result,alt,"",ocr)
-                        if not recs and ocr:
-                            # OCR em faixas pequenas para recuperar as linhas da tabela.
-                            fine=extract_rows_from_image(page)
-                            recs=parse_rows(norm(fine),dt,url,pno,rid,eixo,mod,grupo,sub,result,alt,"",True)
-                        if not recs: issues.append(f"p.{pno} resenha {rid or '?'}: sem processos extraídos; exige revisão.")
-                        else:
-                            rows+=recs
-                            resenhas.add((dt,rid))
+                    candidates=list(gediv_blocks(text))
+                    inherited=False
+                    # Só herdar contexto com marcador explícito e a MESMA resenha.
+                    # Tabelas soltas e atos de outra unidade não provam GEDIV.
+                    if not candidates and continuation and re.search(r"CONTINUA",text):
+                        match=PAT_RES.search(text)
+                        if match and match.group(1)==continuation['resenha'] and not PAT_OTHER_GERENCIA.search(text):
+                            candidates=[text]; inherited=True
+                            issues.append(f"p.{pno}: continuação da resenha {match.group(1)} exige conferência de vínculo.")
+                    for candidate in candidates:
+                        rm=list(PAT_RES.finditer(candidate))
+                        if not rm:
+                            issues.append(f"p.{pno}: GEDIV identificada sem resenha numerada; revisar ato individual.")
+                        acts=[]
+                        if rm:
+                            for j,m in enumerate(rm):
+                                end=rm[j+1].start() if j+1<len(rm) else len(candidate)
+                                acts.append((m.group(1),candidate[m.start():end]))
+                        else: acts=[("",candidate)]
+                        for rid,act in acts:
+                            eixo,mod,grupo,sub=hierarchy(act)
+                            if inherited:
+                                eixo,mod,grupo,sub=continuation['hierarquia']
+                            alt=alteration(act)
+                            if alt!="Original":
+                                event_id=hashlib.sha256(f"{url}|{pno}|{rid}|{alt}|{act}".encode()).hexdigest()[:20]
+                                events.append({"id":event_id,"data":dt,"fonte":url,"pagina":pno,
+                                    "resenha_modificadora":rid,"tipo":alt,"validacao":"PENDENTE_VINCULACAO",
+                                    "trecho":compact(act)[:1000]})
+                                continue
+                            first_proc=PAT_PROC.search(act)
+                            result=merit(act[:first_proc.start()] if first_proc else act)
+                            if inherited and result=='Não informado': result=continuation['resultado']
+                            if eixo=="Outras publicações GEDIV":
+                                issues.append(f"p.{pno} resenha {rid or '?'}: tema fora dos dois eixos; revisar.")
+                            recs=parse_rows(act,dt,url,pno,rid,eixo,mod,grupo,sub,result,alt,"continuidade" if inherited else "expresso",ocr)
+                            if not recs:
+                                # OCR de página inteira pode pertencer a outra unidade; não atribuí-lo ao bloco.
+                                issues.append(f"p.{pno} resenha {rid or '?'}: sem processos extraídos no bloco; exige revisão.")
+                            else:
+                                rows+=recs
+                                resenhas.add((dt,rid))
+                                continuation={'resenha':rid,'hierarquia':(eixo,mod,grupo,sub),'resultado':result}
+                    if not candidates and (PAT_OTHER_GERENCIA.search(text) or re.search(r"SECRETARIA\s+DE\s+ESTADO",text)):
+                        continuation=None
             except Exception as exc:
                 issues.append(f"p.{pno}: falha de leitura {str(exc)[:120]}")
     # deduplicação mantendo alerta, nunca inventar valores em colisão
-    clean={r["id"]:r for r in rows}
+    clean={}
+    for row in rows:
+        if row['id'] in clean:
+            issues.append(f"p.{row['pagina']}: ocorrência repetida na resenha {row['resenha']}; conferir duplicidade.")
+        else: clean[row['id']]=row
     unique_events={e["id"]:e for e in events}
     return list(clean.values()), {"paginas":page_count,"resenhas":len(resenhas),"pendencias":issues,"eventos":list(unique_events.values())}
 
@@ -266,20 +346,56 @@ def read_state(path):
     if path.exists():
         try: return json.loads(path.read_text(encoding="utf-8"))
         except Exception: raise ValueError("Estado JSON inválido; faça backup antes de continuar")
-    return {"edicoes":[],"registros":[],"eventos":[],"atualizado_em":None}
+    return {"edicoes":[],"registros":[],"eventos":[],"historico_versoes":[],"atualizado_em":None}
 def save_state(state,path):
-    path.parent.mkdir(parents=True,exist_ok=True)
+    path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     state["atualizado_em"]=now()
     temp=path.with_suffix(".tmp")
-    temp.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding="utf-8")
+    write_private(temp,json.dumps(state,ensure_ascii=False,indent=2))
     temp.replace(path)
 def update(state,meta,rows,events=None):
+    meta=copy.deepcopy(meta)
+    previous=next((x for x in state["edicoes"] if x.get("url")==meta["url"]),None)
+    old_rows=[r for r in state["registros"] if r.get("fonte")==meta["url"]]
+    old_events=[e for e in state.get("eventos",[]) if e.get("fonte")==meta["url"]]
+    old_hash=previous.get("arquivo_sha256") if previous else None
+    new_hash=meta.get("arquivo_sha256")
+    changed=bool(old_hash and new_hash and old_hash!=new_hash)
+    if changed:
+        # Guardar o resultado e as evidências anteriores antes de trocar o PDF.
+        snapshots=state.setdefault("historico_versoes",[])
+        if not any(x.get("url")==meta["url"] and x.get("arquivo_sha256")==old_hash for x in snapshots):
+            snapshots.append({"url":meta["url"],"arquivo_sha256":old_hash,
+                "edicao":copy.deepcopy(previous),"registros":copy.deepcopy(old_rows),
+                "eventos":copy.deepcopy(old_events),"arquivada_em":now()})
+        meta["versao_alterada_pendente"]=True
+    elif previous and previous.get("versao_alterada_pendente"):
+        meta["versao_alterada_pendente"]=True
+    if meta.get("versao_alterada_pendente"):
+        issues=meta.setdefault("pendencias",[])
+        message="PDF alterado: conferir versão anterior antes de validar a edição."
+        if message not in issues: issues.append(message)
+        meta["status"]="PROCESSADO COM PENDÊNCIAS"
+    # Para o mesmo PDF, conservar candidatos anteriores e revisões humanas.
+    if old_hash and new_hash==old_hash:
+        merged={r["id"]:r for r in old_rows}
+        for row in rows:
+            prior=merged.get(row["id"])
+            if prior is None or (not reviewed(prior) and not rejected(prior)):
+                merged[row["id"]]=row
+        rows=list(merged.values())
+        if events is not None:
+            merged_events={e["id"]:e for e in old_events}
+            for event in events:
+                prior=merged_events.get(event["id"])
+                if prior is None or (not reviewed(prior) and not rejected(prior)):
+                    merged_events[event["id"]]=event
+            events=list(merged_events.values())
+    meta["registros"]=len(rows)
     by_url={x["url"]:x for x in state["edicoes"]}
     by_url[meta["url"]]=meta
     state["edicoes"]=list(by_url.values())
-    # Se PDF mudou, substituir registros da edição (não somar versões antigas
-    # de extração ao novo documento). A auditoria documental final requer modelo
-    # de versões próprio; este coletor continua sendo protótipo.
+    # As versões de PDF alterado permanecem em historico_versoes.
     kept=[r for r in state["registros"] if r.get("fonte")!=meta["url"]]
     by_id={r["id"]:r for r in kept}
     for r in rows:
@@ -291,20 +407,24 @@ def update(state,meta,rows,events=None):
 
 def build_html(state,outdir):
     template=(ROOT/"site"/"index.html").read_text(encoding="utf-8")
-    outdir.mkdir(parents=True,exist_ok=True)
+    outdir.mkdir(mode=0o700,parents=True,exist_ok=True)
     def write(filename,data):
         # substituição segura para tag JSON
         embedded=json.dumps(data,ensure_ascii=False).replace("<","\\u003c").replace("</","<\\/")
-        (outdir/filename).write_text(template.replace("__GEDIV_EMBED_DATA__",embedded),encoding="utf-8")
+        target=outdir/filename
+        write_private(target,template.replace("__GEDIV_EMBED_DATA__",embedded))
     repo=os.getenv("GITHUB_REPOSITORY","")
     workflow_url=f"https://github.com/{repo}/actions/workflows/gediv.yml" if repo else ""
     write("painel_privado.html",{"mode":"privado","workflow_url":workflow_url,**state})
     # Não gerar uma cópia pública com linhas individuais.
-    (outdir/"dados_agregados.json").write_text(json.dumps({"atualizado_em":state.get("atualizado_em"),"edicoes":len(state["edicoes"]),"decisoes":len(state["registros"])},ensure_ascii=False),encoding="utf-8")
+    aggregate=outdir/"dados_agregados.json"
+    write_private(aggregate,json.dumps({"atualizado_em":state.get("atualizado_em"),"edicoes":len(state["edicoes"]),"decisoes_validadas":sum(reviewed(r) for r in state["registros"]),"candidatos_pendentes":sum(not reviewed(r) and not rejected(r) for r in state["registros"])},ensure_ascii=False))
+    from dashboard import build_interactive_html
+    build_interactive_html(state,ROOT,outdir,workflow_url)
 def main(argv=None):
     ap=argparse.ArgumentParser(description="Robô GEDIV — DOE Paraíba")
-    ap.add_argument("--inicio",default=(date.today()-timedelta(days=14)).isoformat())
-    ap.add_argument("--fim",default=date.today().isoformat())
+    ap.add_argument("--inicio",default=None)
+    ap.add_argument("--fim",default=None)
     ap.add_argument("--pdf",help="Teste local: caminho PDF existente, sem acesso à internet")
     ap.add_argument("--data-pdf",help="Data oficial do PDF local: AAAA-MM-DD")
     ap.add_argument("--url-pdf",default="",help="Fonte oficial comprovada; deixe em branco se documento enviado")
@@ -317,9 +437,23 @@ def main(argv=None):
     ap.add_argument("--rever-dias",type=int,default=14,
                     help="Conferir se PDFs recentes foram substituídos (modo diário)")
     args=ap.parse_args(argv)
+    if args.max_edicoes < 1: ap.error("--max-edicoes precisa ser positivo")
+    try:
+        local_day=date.fromisoformat(args.data_pdf) if args.data_pdf else None
+        end=date.fromisoformat(args.fim) if args.fim else (local_day or date.today())
+        start=date.fromisoformat(args.inicio) if args.inicio else (local_day or end-timedelta(days=14))
+    except ValueError:
+        ap.error("Data inválida; informe AAAA-MM-DD")
+    if end<start: ap.error("Intervalo inválido")
     statefile=Path(args.estado); state=read_state(statefile)
+    total_errors=0
     if args.pdf:
         if not args.data_pdf: ap.error("--data-pdf é obrigatório com --pdf")
+        if not start<=local_day<=end:
+            print("PDF fora do período solicitado; nenhum registro incluído.")
+            save_state(state,statefile)
+            build_html(state,Path(args.saida))
+            return 0
         pdf=Path(args.pdf)
         if not pdf.is_file(): ap.error("PDF não encontrado: "+str(pdf))
         url=args.url_pdf or "Documento fornecido para teste local — referência oficial não comprovada"
@@ -328,8 +462,6 @@ def main(argv=None):
         update(state,meta,rows,info["eventos"])
         print("PDF local",json.dumps(meta,ensure_ascii=False),len(rows),"registros")
     else:
-        start,end=date.fromisoformat(args.inicio),date.fromisoformat(args.fim)
-        if end<start:ap.error("Intervalo inválido")
         session=requests.Session()
         editions=discover(start,end,session)
         print(f"Localizadas {len(editions)} edições na fonte oficial para {start} a {end}",flush=True)
@@ -341,7 +473,7 @@ def main(argv=None):
         threshold=(end-timedelta(days=max(args.rever_dias,0))).isoformat()
         pending=[e for e in editions
                  if e["url"] not in previous
-                 or not previous[e["url"]].get("status","").startswith("PROCESSADO")]
+                 or not completed(previous[e["url"]])]
         recent=[e for e in editions if e["data"]>=threshold]
         if args.modo=="diario":
             # Conservar parte do lote para histórico, mesmo que haja muitas
@@ -381,7 +513,7 @@ def main(argv=None):
                 meta["arquivo_sha256"]=sha
                 existing=previous.get(url)
                 if (existing and existing.get("arquivo_sha256")==sha
-                    and existing.get("status","").startswith("PROCESSADO")):
+                    and completed(existing)):
                     print("Sem alterações",dt,url,flush=True)
                     continue
                 name=cache/(sha[:20]+".pdf");name.write_bytes(binary)
@@ -397,12 +529,20 @@ def main(argv=None):
                 total_errors+=1
                 meta["pendencias"]=[str(exc)]
                 # Não apagar dados bons por uma falha de rede posterior.
-                if url not in previous or not previous[url].get("status","").startswith("PROCESSADO"):
+                if url not in previous:
                     update(state,meta,[])
+                else:
+                    # Preserve os registros e mantenha o erro visível para nova tentativa.
+                    kept=copy.deepcopy(previous[url])
+                    kept["status"]="PROCESSADO COM PENDÊNCIAS"
+                    kept.setdefault("pendencias",[]).append("Falha de reprocessamento: "+str(exc)[:200])
+                    for i,item in enumerate(state["edicoes"]):
+                        if item.get("url")==url: state["edicoes"][i]=kept; break
+                    previous[url]=kept
                 print("ERRO",dt,str(exc),file=sys.stderr,flush=True)
             save_state(state,statefile)
         covered={x["url"] for x in state["edicoes"]
-                 if x.get("status","").startswith("PROCESSADO")}
+                 if completed(x)}
         remaining=sum(1 for e in editions if e["url"] not in covered)
         print(f"COBERTURA: edições descobertas {len(editions)}, processadas {len(covered)}, "
               f"pendentes no intervalo {remaining}, erros neste lote {total_errors}",flush=True)
@@ -414,4 +554,5 @@ def main(argv=None):
     save_state(state,statefile)
     build_html(state,Path(args.saida))
     print(f"Resultado: {len(state['registros'])} registros, {len(state['edicoes'])} edições; HTML em {args.saida}")
-if __name__=="__main__":main()
+    return 2 if total_errors else 0
+if __name__=="__main__":sys.exit(main())
